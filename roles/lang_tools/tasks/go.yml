@@ -1,0 +1,11 @@
+---
+# `go install <pkg>@latest` builds and installs the latest version every time,
+# so a re-run is an upgrade. Reports changed always (go install is quiet and
+# gives no reliable "already up to date" signal).
+- name: go install tools
+  ansible.builtin.command:
+    cmd: "go install {{ item }}@latest"
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  loop: "{{ lang_tools_go }}"
+  changed_when: true

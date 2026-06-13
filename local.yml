@@ -1,0 +1,49 @@
+---
+# local.yml - entry playbook, designed to run against localhost via
+# ansible-pull or: ansible-playbook -i 'localhost,' -c local local.yml
+#
+# Role order matters:
+#   1. common          - gather facts, sanity-check the environment
+#   2. native_packages - low-level utils from apt/dnf (platform binaries)
+#   3. homebrew        - install brew + fast-moving tools + toolchains (node/uv)
+#   4. golang          - install Go via Homebrew
+#   5. rust            - install Rust via rustup + rust-analyzer
+#   6. lang_tools      - helix LSPs/formatters via go/cargo/npm/uv
+#   7. dotfiles        - hand off to the existing bare-repo dotfiles process
+
+- name: Provision local development machine
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  # Most package tasks need root on Linux; Homebrew and dotfiles must NOT.
+  # We therefore do not set a blanket `become: true` here -- each role opts
+  # in per-task. This keeps brew/dotfiles running as the invoking user.
+  become: false
+
+  pre_tasks:
+    - name: Assert we are on a supported OS
+      ansible.builtin.assert:
+        that:
+          - ansible_system in ['Linux', 'Darwin']
+        fail_msg: >-
+          Unsupported system '{{ ansible_system }}'.
+          This playbook supports Linux and macOS only.
+
+    - name: Assert Linux is a supported family
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family in ['Debian', 'RedHat']
+        fail_msg: >-
+          Unsupported Linux family '{{ ansible_os_family }}'.
+          Supported: Debian, RedHat (Enterprise Linux).
+      when: ansible_system == 'Linux'
+
+  roles:
+    - role: common
+    - role: native_packages
+    - role: homebrew
+    - role: golang
+    - role: rust
+    - role: lang_tools
+    - role: dotfiles

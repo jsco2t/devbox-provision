@@ -1,0 +1,61 @@
+---
+# native_packages role - install low-level utilities from apt/dnf.
+# All tasks here require root, so the whole role runs with become.
+#
+# macOS has no native package manager in scope (Brew covers it), so this
+# role is a no-op on Darwin.
+
+- name: Install native packages (Debian family)
+  when: ansible_os_family == 'Debian'
+  become: true
+  block:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    # state: latest so a re-run upgrades already-installed packages.
+    - name: Install/upgrade common + Debian packages
+      ansible.builtin.apt:
+        name: "{{ native_packages_common + native_packages_debian }}"
+        state: latest
+
+    # On Debian, fd ships as 'fdfind' to avoid a name clash. Provide an 'fd'
+    # shim in /usr/local/bin so configs that call `fd` just work.
+    - name: Symlink fdfind -> fd (Debian)
+      ansible.builtin.file:
+        src: /usr/bin/fdfind
+        dest: /usr/local/bin/fd
+        state: link
+      when: "'fd-find' in native_packages_debian"
+
+- name: Install native packages (RedHat family)
+  when: ansible_os_family == 'RedHat'
+  become: true
+  block:
+    - name: Enable EPEL (provides jq, fzf, fd-find, ripgrep on EL)
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+      # On RHEL proper, epel-release may come from a URL rather than a repo;
+      # ignore failure and let the package install surface any real problem.
+      failed_when: false
+
+    # state: latest so a re-run upgrades already-installed packages.
+    - name: Install/upgrade common + RedHat packages
+      ansible.builtin.dnf:
+        name: "{{ native_packages_common + native_packages_redhat }}"
+        state: latest
+
+    - name: Symlink fdfind -> fd (EL)
+      ansible.builtin.file:
+        src: /usr/bin/fdfind
+        dest: /usr/local/bin/fd
+        state: link
+      when: "'fd-find' in native_packages_redhat"
+      failed_when: false
+
+- name: Skip native packages on macOS
+  ansible.builtin.debug:
+    msg: "macOS detected - native utilities come from Homebrew instead."
+  when: ansible_system == 'Darwin'

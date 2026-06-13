@@ -1,0 +1,36 @@
+---
+# rust role - install the Rust toolchain via rustup, then add the
+# rust-analyzer component used by the helix editor.
+#
+# Runs entirely as the invoking user. Never become root here: rustup installs
+# into ~/.rustup and ~/.cargo and must be owned by the user.
+
+- name: Check whether rustup is already installed
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/.cargo/bin/rustup"
+  register: rustup_bin
+
+# Fresh install: official rustup-init, non-interactive, default stable profile.
+# --no-modify-path leaves shell init to the dotfiles repo (it owns PATH).
+- name: Install rustup (non-interactive)
+  ansible.builtin.shell:
+    cmd: >-
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+      sh -s -- -y --no-modify-path --default-toolchain stable
+  args:
+    creates: "{{ ansible_user_dir }}/.cargo/bin/rustup"
+  when: not rustup_bin.stat.exists
+
+# Re-run: upgrade the existing toolchain to the latest stable.
+- name: Update Rust toolchain (upgrade on re-run)
+  ansible.builtin.command:
+    cmd: "{{ ansible_user_dir }}/.cargo/bin/rustup update stable"
+  when: rustup_bin.stat.exists
+  register: rustup_update
+  changed_when: "'updated' in rustup_update.stdout or 'installed' in rustup_update.stdout"
+
+- name: Add rust-analyzer component
+  ansible.builtin.command:
+    cmd: "{{ ansible_user_dir }}/.cargo/bin/rustup component add rust-analyzer"
+  register: ra_add
+  changed_when: "'installing' in ra_add.stderr or 'installing' in ra_add.stdout"

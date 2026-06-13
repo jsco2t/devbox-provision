@@ -1,0 +1,80 @@
+name: CI
+
+# Run the full bootstrap + converge on every change to main, plus on demand.
+# A single Debian target is sufficient (no OS matrix needed).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  converge:
+    name: bootstrap + converge (debian)
+    runs-on: ubuntu-latest
+    # A full converge installs Homebrew, Go, Rust, and ~25 language tools
+    # (some built from source), so give it plenty of headroom.
+    timeout-minutes: 90
+    container:
+      # Debian trixie (glibc 2.41) rather than bookworm (glibc 2.36): current
+      # Homebrew bottles require glibc >= 2.39, and on an older host Homebrew
+      # drags in its own brewed glibc/gcc toolchain (heavy and failure-prone in
+      # CI). Trixie also ships a modern ansible-core/community.general, so the
+      # homebrew module is compatible with current Homebrew output.
+      image: debian:trixie
+    env:
+      # Homebrew and several tools expect a UTF-8 locale.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+
+    steps:
+      # actions/checkout prefers git; install base deps (and sudo) first so the
+      # rest of the job can run as a non-root user.
+      - name: Install base dependencies
+        run: |
+          set -eux
+          apt-get update -y
+          apt-get install -y --no-install-recommends \
+            sudo curl git ca-certificates file procps build-essential \
+            python3 python3-pip locales
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Homebrew refuses to run as root, so create an unprivileged user with
+      # passwordless sudo (the playbook's apt tasks need become) and hand the
+      # checkout over to it.
+      - name: Create non-root build user
+        run: |
+          set -eux
+          useradd -m -s /bin/bash dev
+          echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev
+          chmod 0440 /etc/sudoers.d/dev
+          chown -R dev:dev "$GITHUB_WORKSPACE"
+
+      # Exercises bootstrap.sh end to end against this checkout: it installs
+      # Ansible + the community.general collection, then converges local.yml.
+      - name: Bootstrap + converge
+        run: |
+          set -eux
+          sudo -u dev env \
+            HOME=/home/dev \
+            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            PROVISION_LOCAL=1 \
+            DOTFILES_USER_NAME="CI Tester" \
+            DOTFILES_USER_EMAIL="ci@example.com" \
+            bash "$GITHUB_WORKSPACE/bootstrap.sh"
+
+      # A second converge exercises the upgrade-on-rerun path end to end and
+      # confirms it completes without error. Note: several tasks (go install,
+      # cargo --force, brew state: latest) are intentionally always-changed, so
+      # this is not a zero-change idempotency assertion.
+      - name: Re-converge (upgrade-on-rerun path)
+        run: |
+          set -eux
+          sudo -u dev env \
+            HOME=/home/dev \
+            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            PROVISION_LOCAL=1 \
+            DOTFILES_USER_NAME="CI Tester" \
+            DOTFILES_USER_EMAIL="ci@example.com" \
+            bash "$GITHUB_WORKSPACE/bootstrap.sh"

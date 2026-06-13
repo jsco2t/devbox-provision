@@ -1,0 +1,22 @@
+# group_vars/all.yml - values shared across all roles.
+#
+# Your git identity for the dotfiles bare repo (written with `config --local`
+# to the bare repo only; it does not touch global git config). It mirrors what
+# the original .dotsetup.sh did.
+#
+# These read from environment variables first, so you can set your identity
+# WITHOUT editing this file (handy when you don't own/fork the repo):
+#
+#   export DOTFILES_USER_NAME="Your Name"
+#   export DOTFILES_USER_EMAIL="you@example.com"
+#
+# then run bootstrap.sh. The fallbacks below are intentionally empty so no
+# personal info lives in the repo. When name/email are empty, the dotfiles role
+# simply SKIPS the `git config --local` user.name/user.email steps (guarded by
+# `when: ... | length > 0`), so an empty value is harmless. Set the env vars to
+# have your identity written to the dotfiles bare repo.
+dotfiles_user_name: "{{ lookup('env', 'DOTFILES_USER_NAME') | default('', true) }}"
+dotfiles_user_email: "{{ lookup('env', 'DOTFILES_USER_EMAIL') | default('', true) }}"
+
+# Override the dotfiles source if you fork the repo (also honours an env var):
+dotfiles_repo_url: "{{ lookup('env', 'DOTFILES_REPO_URL') | default('https://github.com/jsco2t/dotfiles.git', true) }}"

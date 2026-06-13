@@ -1,0 +1,12 @@
+---
+# uv installs each tool in an isolated venv. Mirror the reference deps.sh:
+# try to upgrade (no-op/fails cleanly if not yet installed) and fall back to a
+# fresh install. This gives install-if-missing + upgrade-on-rerun in one step.
+- name: uv tool install/upgrade
+  ansible.builtin.shell:
+    cmd: "uv tool upgrade {{ item }} 2>/dev/null || uv tool install {{ item }}"
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  loop: "{{ lang_tools_python }}"
+  register: uv_result
+  changed_when: "'Nothing to upgrade' not in uv_result.stdout and 'already installed' not in uv_result.stdout"

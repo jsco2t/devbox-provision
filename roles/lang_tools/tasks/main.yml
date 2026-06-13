@@ -1,0 +1,32 @@
+---
+# lang_tools role - install/upgrade the helix editor's language tooling using
+# each language's native installer. Runs as the invoking user (never root):
+# go/cargo/npm/uv all install into the user's home.
+#
+# Depends on the toolchains being present first:
+#   - go, node (npm), uv        -> installed by the homebrew role
+#   - cargo, rustup             -> installed by the rust role
+# So this role must run after `homebrew` and `rust` in local.yml.
+
+# A freshly installed brew / rustup / etc. is not on this Ansible session's
+# PATH. Build a PATH that exposes every toolchain and every install target dir:
+#   ~/.cargo/bin   cargo + cargo-installed binaries
+#   ~/go/bin       go-installed binaries (default GOBIN)
+#   ~/.local/bin   uv tool shims
+#   <brew>/bin     go, node, npm, uv themselves
+- name: Compose PATH exposing all toolchains
+  ansible.builtin.set_fact:
+    lang_tools_path: >-
+      {{ ansible_user_dir }}/.cargo/bin:{{ ansible_user_dir }}/go/bin:{{ ansible_user_dir }}/.local/bin:{{ brew_prefix }}/bin:{{ ansible_env.PATH }}
+
+- name: Install/upgrade Go tools
+  ansible.builtin.include_tasks: go.yml
+
+- name: Install/upgrade Cargo tools
+  ansible.builtin.include_tasks: cargo.yml
+
+- name: Install/upgrade npm tools
+  ansible.builtin.include_tasks: npm.yml
+
+- name: Install/upgrade Python tools
+  ansible.builtin.include_tasks: python.yml

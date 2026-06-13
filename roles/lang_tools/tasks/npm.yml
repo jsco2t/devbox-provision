@@ -1,0 +1,12 @@
+---
+# `npm i -g <pkg>` installs the latest version, so a re-run upgrades. npm
+# reports "changed X packages" / "added X packages" on actual changes and
+# "up to date" otherwise.
+- name: npm install -g tools
+  ansible.builtin.command:
+    cmd: "npm install -g {{ item }}"
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  loop: "{{ lang_tools_npm }}"
+  register: npm_result
+  changed_when: "'up to date' not in npm_result.stdout"

@@ -1,0 +1,11 @@
+---
+# Defaults for the dotfiles role. Override these in group_vars or via
+# --extra-vars if your fork lives elsewhere.
+
+dotfiles_repo_url: "https://github.com/jsco2t/dotfiles.git"
+dotfiles_git_dir: "{{ ansible_user_dir }}/.dotfiles"
+dotfiles_branch: "main"
+
+# These get written into the bare repo's local config.
+dotfiles_user_name: ""      # set in group_vars/all.yml
+dotfiles_user_email: ""     # set in group_vars/all.yml

@@ -1,0 +1,16 @@
+---
+# golang role - install the Go toolchain from Homebrew (both Linux and macOS).
+#
+# Go is installed via brew per request; this mirrors the rust role as a
+# dedicated toolchain role. It must run after the homebrew role, which installs
+# brew and sets the `brew_prefix` / `brew_bin_dir` facts.
+#
+# Runs as the invoking user (brew never runs as root). state: latest means a
+# re-run upgrades Go to the current release.
+
+- name: Install/upgrade Go (Homebrew)
+  community.general.homebrew:
+    name: go
+    state: latest
+    update_homebrew: true
+    path: "{{ brew_bin_dir }}"

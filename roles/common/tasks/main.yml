@@ -1,0 +1,45 @@
+---
+# common role - print an environment summary and ensure git is present
+# (needed by both ansible-pull and the dotfiles role).
+
+- name: Show detected environment
+  ansible.builtin.debug:
+    msg:
+      - "system={{ ansible_system }}"
+      - "os_family={{ ansible_os_family | default('n/a') }}"
+      - "distribution={{ ansible_distribution | default('n/a') }} {{ ansible_distribution_version | default('') }}"
+      - "architecture={{ ansible_architecture }}"
+      - "user={{ ansible_user_id }}"
+
+- name: Ensure git is installed (Debian)
+  become: true
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Ensure git is installed (RedHat)
+  become: true
+  ansible.builtin.dnf:
+    name: git
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+# macOS ships git via Xcode CLT; brew install happens in the homebrew role.
+- name: Ensure Xcode command line tools (macOS)
+  ansible.builtin.command: xcode-select -p
+  register: xcode_clt
+  changed_when: false
+  failed_when: false
+  when: ansible_system == 'Darwin'
+
+- name: Prompt to install Xcode CLT if missing (macOS)
+  ansible.builtin.fail:
+    msg: >-
+      Xcode command line tools not found. Run 'xcode-select --install',
+      complete the GUI installer, then re-run the bootstrap.
+  when:
+    - ansible_system == 'Darwin'
+    - xcode_clt.rc is defined
+    - xcode_clt.rc != 0

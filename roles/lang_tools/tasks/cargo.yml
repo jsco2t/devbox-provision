@@ -1,0 +1,24 @@
+---
+# crates.io crates. --force rebuilds to the latest published version on every
+# run (install if missing, upgrade if present). --locked uses the crate's
+# pinned Cargo.lock for reproducible builds.
+- name: cargo install (crates.io)
+  ansible.builtin.command:
+    cmd: "cargo install --locked --force {{ item.name }} {{ item.extra_args }}"
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  loop: "{{ lang_tools_cargo }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+# git-source crates (not published to crates.io).
+- name: cargo install (git source)
+  ansible.builtin.command:
+    cmd: "cargo install --locked --force --git {{ item.repo }} {{ item.name }}"
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  loop: "{{ lang_tools_cargo_git }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true

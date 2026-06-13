@@ -1,0 +1,62 @@
+---
+# homebrew role - install Homebrew if absent (Linux + macOS), then install /
+# upgrade a list of formulae. All brew operations run as the invoking user,
+# never root.
+
+- name: Determine Homebrew prefix
+  ansible.builtin.set_fact:
+    brew_prefix: >-
+      {{ '/opt/homebrew' if (ansible_system == 'Darwin' and ansible_architecture == 'arm64')
+         else '/usr/local' if ansible_system == 'Darwin'
+         else '/home/linuxbrew/.linuxbrew' }}
+
+- name: Check whether brew is already on PATH
+  ansible.builtin.command: brew --version
+  register: brew_check
+  changed_when: false
+  failed_when: false
+
+- name: Check for brew binary at expected prefix
+  ansible.builtin.stat:
+    path: "{{ brew_prefix }}/bin/brew"
+  register: brew_bin
+
+- name: Install Homebrew (non-interactive)
+  ansible.builtin.shell: >-
+    /bin/bash -c "$(curl -fsSL
+    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  environment:
+    NONINTERACTIVE: "1"
+  when:
+    - brew_check.rc != 0
+    - not brew_bin.stat.exists
+  changed_when: true
+
+# Tell the homebrew modules exactly where brew lives, since a freshly installed
+# brew is not yet on this Ansible session's PATH. brew always lives at
+# <prefix>/bin regardless of how it was installed.
+- name: Resolve brew bin directory
+  ansible.builtin.set_fact:
+    brew_bin_dir: "{{ brew_prefix }}/bin"
+
+# state: latest + update_homebrew: true means a re-run upgrades installed
+# formulae as well as installing any that are missing. On macOS we also pull in
+# the low-level utils that Linux gets from its native package manager.
+#
+# Everything here lives in homebrew-core (trusted by default); no third-party
+# taps are used, so there is no tap-trust gate to work around.
+- name: Install/upgrade Homebrew formulae
+  community.general.homebrew:
+    name: >-
+      {{ homebrew_formulae
+         + (homebrew_formulae_darwin if ansible_system == 'Darwin' else []) }}
+    state: latest
+    update_homebrew: true
+    path: "{{ brew_bin_dir }}"
+
+- name: Reminder to add brew to shell init (Linux)
+  ansible.builtin.debug:
+    msg: >-
+      Ensure your dotfiles eval the brew shellenv on Linux:
+      eval "$({{ brew_prefix }}/bin/brew shellenv)"
+  when: ansible_system == 'Linux'

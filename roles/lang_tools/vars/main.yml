@@ -1,0 +1,54 @@
+---
+# lang_tools role - language-native package lists for the helix editor's
+# LSPs, formatters, and linters. These tools move fast and/or are absent from
+# distro repos and Homebrew, so they are installed with their language's own
+# installer (go / cargo / npm / uv) exactly as the reference deps.sh does.
+
+# Go tools: `go install <pkg>@latest` (re-running fetches latest = upgrade).
+lang_tools_go:
+  - golang.org/x/tools/gopls
+  - github.com/go-delve/delve/cmd/dlv
+  - golang.org/x/tools/cmd/goimports
+  - mvdan.cc/gofumpt
+  - github.com/golangci/golangci-lint/cmd/golangci-lint
+  - honnef.co/go/tools/cmd/staticcheck
+  - github.com/google/yamlfmt/cmd/yamlfmt
+  - mvdan.cc/sh/v3/cmd/shfmt
+  - github.com/mattn/efm-langserver
+  - github.com/mrjosh/helm-ls
+  # terraform-ls: HashiCorp's Terraform LSP. deps.sh installs this via brew
+  # (hashicorp/tap), but that tap's trust gate breaks all brew operations, so
+  # we build it from source here instead. Self-reports a "dev" version but is
+  # functionally complete.
+  - github.com/hashicorp/terraform-ls
+
+# Cargo crates from crates.io: `cargo install --locked --force` (force =
+# always rebuild to the latest published version on re-run).
+lang_tools_cargo:
+  - name: taplo-cli
+    extra_args: "--features lsp"
+  - name: harper-ls
+    extra_args: ""
+  - name: dprint
+    extra_args: ""
+
+# Cargo crates installed from a git source (not on crates.io).
+lang_tools_cargo_git:
+  - name: markdown-oxide
+    repo: "https://github.com/Feel-ix-343/markdown-oxide.git"
+
+# npm global packages: `npm i -g <pkg>` (always installs latest = upgrade).
+lang_tools_npm:
+  - "@ansible/ansible-language-server"
+  - vscode-langservers-extracted
+  - dockerfile-language-server-nodejs
+  - "@microsoft/compose-language-service"
+  - yaml-language-server
+  - bash-language-server
+  - markdownlint-cli
+  - prettier
+
+# Python tools via uv (isolated per-tool venvs).
+lang_tools_python:
+  - python-lsp-server
+  - black

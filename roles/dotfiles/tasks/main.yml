@@ -1,0 +1,86 @@
+---
+# dotfiles role - reproduce the existing bare-repo ("dot") workflow from
+# jsco2t/dotfiles, expressed idempotently so it is safe to re-run.
+#
+# The original .dotsetup.sh does:
+#   git clone --bare <repo> $HOME/.dotfiles
+#   dot config status.showUntrackedFiles no
+#   dot config user.name / user.email
+#   dot reset --hard ; dot pull origin main
+#
+# This role does the same but without the destructive `rm -fr` up front,
+# and skips the clone if the bare repo already exists.
+#
+# Runs entirely as the invoking user. Never become root here.
+
+- name: Ensure .dotfiles and .dotsetup.sh are gitignored in $HOME
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_user_dir }}/.gitignore"
+    line: "{{ item }}"
+    create: true
+    mode: "0644"
+  loop:
+    - ".dotfiles"
+    - ".dotsetup.sh"
+
+- name: Check whether the bare dotfiles repo already exists
+  ansible.builtin.stat:
+    path: "{{ dotfiles_git_dir }}/HEAD"
+  register: dotfiles_bare
+
+- name: Bare-clone the dotfiles repo
+  ansible.builtin.command:
+    cmd: "git clone --bare {{ dotfiles_repo_url }} {{ dotfiles_git_dir }}"
+  when: not dotfiles_bare.stat.exists
+  changed_when: true
+
+# Helper: every git invocation against the bare repo uses these flags,
+# the Ansible equivalent of the `dot` alias.
+- name: Configure bare repo - hide untracked files
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      config --local status.showUntrackedFiles no
+  changed_when: false
+
+- name: Configure bare repo - user.name
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      config --local user.name "{{ dotfiles_user_name }}"
+  when: dotfiles_user_name | length > 0
+  changed_when: false
+
+- name: Configure bare repo - user.email
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      config --local user.email "{{ dotfiles_user_email }}"
+  when: dotfiles_user_email | length > 0
+  changed_when: false
+
+- name: Fetch latest dotfiles
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      fetch origin {{ dotfiles_branch }}
+  changed_when: false
+
+# `reset --hard` overwrites local copies of TRACKED files with the repo version.
+# Untracked files in $HOME are left alone (status.showUntrackedFiles no + reset
+# only touching tracked paths). This matches the original process.
+#
+# Reset to FETCH_HEAD (written by the fetch above), NOT origin/{{ dotfiles_branch }}:
+# `git clone --bare` does not create remote-tracking refs (refs/remotes/origin/*),
+# so `origin/main` does not exist. FETCH_HEAD is the tip we just fetched.
+- name: Apply dotfiles (reset --hard to fetched tip)
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      reset --hard FETCH_HEAD
+  register: dot_reset
+  changed_when: "'HEAD is now at' in dot_reset.stdout"
+
+- name: Show applied dotfiles HEAD
+  ansible.builtin.debug:
+    msg: "{{ dot_reset.stdout_lines | default(['(no change)']) }}"

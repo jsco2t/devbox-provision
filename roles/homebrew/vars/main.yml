@@ -1,0 +1,49 @@
+---
+# Homebrew formulae, installed on BOTH Linux and macOS.
+#
+# Homebrew resolves architecture (arm64/x86_64) itself, so no per-arch logic is
+# needed. Re-running upgrades these (the role uses state: latest).
+#
+# Keep this list to fast-moving tools, language toolchains, and the few LSP
+# tools that have no language-native installer. Low-level utils that rarely
+# change (jq, ripgrep, fd, etc.) come from the native package manager instead,
+# so they are deliberately NOT listed here.
+
+homebrew_formulae:
+  # Language toolchains needed by the lang_tools role (npm i -g / uv tool
+  # install). Go has its own role (golang); Rust is handled via rustup (rust).
+  - node
+  - uv
+
+  # User-requested fast-moving tools.
+  - bat
+  - yq
+  - neovim
+  - helix
+  - starship
+
+  # Extras (kept by user request).
+  - eza
+  - zoxide
+  - git-delta
+  - lazygit
+  - gh
+
+  # LSP tooling with no language-native installer (from the helix deps set).
+  # NOTE: terraform-ls is NOT here -- it lives in hashicorp/tap, a third-party
+  # tap whose trust gate poisons all brew operations, so it is installed via
+  # `go install` in the lang_tools role instead.
+  - marksman
+  - shellcheck
+
+# macOS has no native package manager in scope, so the low-level utils that
+# Linux gets from apt/dnf (see roles/native_packages) must come from Homebrew
+# there. These are added to the install list only when ansible_system ==
+# 'Darwin', so Linux keeps its native-package preference.
+homebrew_formulae_darwin:
+  - jq
+  - fzf
+  - ripgrep
+  - fd
+  - tmux
+  - vim

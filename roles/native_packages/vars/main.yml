@@ -1,0 +1,32 @@
+---
+# Low-level utilities you prefer to get from the platform's own package
+# manager rather than Homebrew. Keep this list to things that are
+# well-packaged and current enough on both Debian and EL.
+#
+# Names occasionally differ between families; split where needed.
+
+# Common across both families (names happen to match).
+native_packages_common:
+  - jq
+  - fzf
+  - git
+  - curl
+  - wget
+  - unzip
+  - tar
+  - gnupg
+  - ca-certificates
+  - vim
+  - tmux
+
+# Debian/Ubuntu-specific names.
+native_packages_debian:
+  - build-essential
+  - fd-find          # binary is 'fdfind' on Debian; symlink handled below
+  - ripgrep
+
+# RedHat/EL-specific names (require EPEL for several of these).
+native_packages_redhat:
+  - "@Development Tools"   # group: compilers, make, etc.
+  - fd-find
+  - ripgrep
