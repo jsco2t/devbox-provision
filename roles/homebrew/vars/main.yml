@@ -21,6 +21,7 @@ homebrew_formulae:
   - neovim
   - helix
   - starship
+  - btop
 
   # Extras (kept by user request).
   - eza
