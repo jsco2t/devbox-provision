@@ -5,12 +5,12 @@
 # dedicated toolchain role. It must run after the homebrew role, which installs
 # brew and sets the `brew_prefix` / `brew_bin_dir` facts.
 #
-# Runs as the invoking user (brew never runs as root). state: latest means a
-# re-run upgrades Go to the current release.
+# Runs as the invoking user (brew never runs as root). Default installs Go only
+# if missing (no `brew update`); upgrade mode bumps it to the current release.
 
-- name: Install/upgrade Go (Homebrew)
+- name: Install Go (Homebrew; upgrade bumps to latest)
   community.general.homebrew:
     name: go
-    state: latest
-    update_homebrew: true
+    state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
+    update_homebrew: "{{ upgrade | bool }}"
     path: "{{ brew_bin_dir }}"

@@ -1,12 +1,23 @@
 ---
-# `npm i -g <pkg>` installs the latest version, so a re-run upgrades. npm
-# reports "changed X packages" / "added X packages" on actual changes and
-# "up to date" otherwise.
-- name: npm install -g tools
+# Default: install a global package only if its module dir is missing under the
+# npm global root (the `creates` guard). Guarding on the package dir rather than
+# a binary name handles scoped packages (@ansible/ansible-language-server) and
+# packages whose binary name differs from the package name. Upgrade: `creates`
+# is omitted so `npm i -g` re-fetches the latest.
+- name: Resolve npm global root
+  ansible.builtin.command: npm root -g
+  environment:
+    PATH: "{{ lang_tools_path }}"
+  register: npm_root
+  changed_when: false
+
+# No changed_when: the command module reports `changed` when it runs and `ok`
+# when `creates` skips it.
+- name: npm install -g tools (skip if present; --upgrade re-fetches latest)
   ansible.builtin.command:
     cmd: "npm install -g {{ item }}"
+  args:
+    creates: "{{ omit if (upgrade | bool) else npm_root.stdout ~ '/' ~ item }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_npm }}"
-  register: npm_result
-  changed_when: "'up to date' not in npm_result.stdout"

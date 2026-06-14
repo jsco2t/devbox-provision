@@ -16,41 +16,48 @@ There is no application code here: the "code" is Ansible YAML plus
 ## Commands
 
 ```bash
-# Converge against the local checkout (primary dev loop — no GitHub pull):
-./bootstrap.sh --local
-# equivalently, skipping the ansible-install step:
-ansible-playbook -i 'localhost,' -c local local.yml
+# Steady-state dev loop: converge against the local checkout (fast; installs
+# only what's missing). This is the primary command.
+./update-env.sh
 
-# Dry run / see what would change:
-ansible-playbook -i 'localhost,' -c local local.yml --check --diff
+# Bump every tool to its latest version (slow path).
+./update-env.sh --upgrade
 
-# Run a single role (tags are not defined; use --start-at-task or limit roles):
-ansible-playbook -i 'localhost,' -c local local.yml --start-at-task="Install/upgrade Go tools"
+# Dry run.
+./update-env.sh --check        # == ansible-playbook ... --check --diff
 
-# Fresh-machine remote path (installs Ansible first, then ansible-pull):
+# Run the playbook directly (what update-env.sh ends up invoking):
+ansible-playbook -i 'localhost,' -c local local.yml -e upgrade=false
+
+# Run a single task onward (no tags defined; use --start-at-task):
+ansible-playbook -i 'localhost,' -c local local.yml -e upgrade=false \
+  --start-at-task="Install Go tools (skip if already built; --upgrade re-fetches @latest)"
+
+# Fresh-machine remote path: ensures git, clones the repo (prompts for location,
+# default <cwd>/devbox-provision), then runs update-env.sh.
 curl -fsSL https://raw.githubusercontent.com/jsco2t/devbox-provision/main/bootstrap.sh | bash
-
-# Re-run on an existing machine via pull:
-ansible-pull -U https://github.com/jsco2t/devbox-provision.git -i 'localhost,' local.yml
 ```
 
 There is no unit-test framework. **CI (`.github/workflows/ci.yml`) is the test**:
-it runs `bootstrap.sh --local` twice in a `debian:trixie` container (as an
-unprivileged `dev` user with passwordless sudo) to prove both fresh-converge and
-upgrade-on-rerun succeed. Validate non-trivial changes by reasoning about that
-flow or replicating it in a Debian container.
+in a `debian:trixie` container (unprivileged `dev` user, passwordless sudo) it
+runs `update-env.sh` three times — **setup** (default converge), **`--upgrade`**
+(bump path), then **default again asserting `changed=0`** (idempotency). Validate
+non-trivial changes by reasoning about that flow or replicating it in a Debian
+container.
 
-**CI gap to be aware of:** CI only exercises the `--local` path, and it
-pre-installs `git` in its base-deps step. It therefore does **not** cover the
-remote `curl | bash` → `ansible-pull` path, where `bootstrap.sh` must install
-`git` itself (via `ensure_git`) _before_ `ansible-pull` can clone the repo, and
-where `BASH_SOURCE[0]` is unset (script comes from stdin under `set -u`). Changes
-to those code paths can't be caught by CI — test them by piping the raw script
-to `bash` on a fresh box.
+**CI gap to be aware of:** CI runs `update-env.sh` directly against the checkout,
+so it does **not** cover `bootstrap.sh` itself — the git-install, the
+clone-location prompt, and the `curl | bash` stdin/`BASH_SOURCE` handling are
+exercised only on a real fresh box. Test those by piping the raw script to `bash`.
+Note the deployment coupling: the remote one-liner fetches `bootstrap.sh` from
+`main`, which then execs `update-env.sh` **from the clone** — so changes to the
+converge flow must be committed/pushed to `main` before a remote test reflects
+them.
 
 ## Architecture
 
-`bootstrap.sh` → (installs Ansible) → `ansible-pull`/`ansible-playbook` runs
+`bootstrap.sh` (git + clone) → `update-env.sh` (installs Ansible + collection,
+detects sudo, writes the `~/update-env.sh` wrapper) → `ansible-playbook` runs
 `local.yml` against `localhost` with `connection: local`. `local.yml` runs seven
 roles **in a fixed order that encodes a dependency chain**:
 
@@ -76,9 +83,9 @@ refuses to run as root; go/cargo/npm/uv install into `$HOME`). When adding tasks
 add `become: true` only to things that genuinely need root, never a blanket
 escalation.
 
-Because those tasks escalate via sudo, `bootstrap.sh` must satisfy sudo before
+Because those tasks escalate via sudo, `update-env.sh` must satisfy sudo before
 invoking Ansible. `detect_become_args()` probes this and passes
-`--ask-become-pass` to ansible-pull/ansible-playbook when sudo needs a password
+`--ask-become-pass` to ansible-playbook when sudo needs a password
 (both passwordless-NOPASSWD and password-prompt hosts are supported; the latter
 needs a TTY, which `curl | bash` has over SSH). The probe runs `sudo -k` first
 so it reads the sudo *policy*, not a cached credential left by an earlier sudo in
@@ -122,11 +129,17 @@ The split is deliberate — match it when adding tools:
   binary absent), so it doesn't re-run once brew exists.
 - **lang_tools** — the Helix tooling, by ecosystem, in `roles/lang_tools/vars/main.yml`:
   `lang_tools_go` (`go install ...@latest`), `lang_tools_cargo` /
-  `lang_tools_cargo_git` (`cargo install --locked --force`), `lang_tools_npm`
+  `lang_tools_cargo_git` (`cargo install --locked`), `lang_tools_npm`
   (`npm i -g`), `lang_tools_python` (`uv tool install`). These lists mirror
   `jsco2t/dotfiles`'s `.config/helix/deps.sh` — keep them in sync. Notable:
   `terraform-ls` is built from source (`go install`) rather than HashiCorp's brew
-  tap, specifically to avoid that tap's trust gate.
+  tap, specifically to avoid that tap's trust gate. Each install task is guarded
+  on the resulting binary so a default converge skips already-installed tools
+  (see Idempotency contract). **When you add a tool here, you must also give its
+  guard target**: go derives the binary as `item | basename` (no extra data
+  needed); cargo/npm/uv need a `bin:` field (or, for npm, the package dir under
+  `npm root -g`) — a wrong/missing guard only costs a needless rebuild, never
+  breakage.
 
 ### dotfiles role — the subtle one
 
@@ -143,12 +156,28 @@ behaviors to preserve:
 
 ## Idempotency contract
 
-Re-run = upgrade. This is by design and means CI's second converge is **not** a
-zero-change assertion. Expect always-changed tasks: `go install ...@latest`,
-`cargo install --force`, `npm i -g`, and brew/apt/dnf `state: latest`. When you
-add a tool via a native package manager, use `state: latest`; when you add it via
-a language installer, follow the existing "fetch latest each run" pattern rather
-than trying to make it report unchanged.
+There are **two converge modes**, switched by the `upgrade` var (default
+`false`; `group_vars/all.yml`, also reads `PROVISION_UPGRADE`; `update-env.sh
+--upgrade` sets `-e upgrade=true`):
+
+- **Default (`upgrade=false`) — fast & idempotent.** Install only what's
+  missing; skip everything present. A steady-state converge must report
+  **`changed=0`** (CI's third run asserts this). Mechanism: `state: present` +
+  `update_homebrew: false` (no `brew update`); apt/dnf `state: present`; the
+  language-tool tasks use `creates:` guards on the resulting binary so
+  already-built tools are skipped; `rustup update` is skipped. The one task that
+  needs care to stay at `changed=0` is the dotfiles `reset --hard` — it keys
+  `changed_when` on HEAD-vs-fetched-tip, not on the always-present "HEAD is now
+  at" output.
+- **Upgrade (`upgrade=true`) — slow.** `brew update` + `state: latest`,
+  go/cargo/npm re-fetch `@latest` (cargo adds `--force`, `creates` omitted),
+  `rustup update`. Intentionally re-does work; **not** a zero-change run.
+
+When adding a tool, wire it into **both** modes: a `state:`/`update_homebrew:`
+that flips on `upgrade`, or a `creates:` guard of the form
+`{{ omit if (upgrade | bool) else <binary path> }}`. Do **not** reintroduce
+unconditional `changed_when: true` / `--force` on the default path — it breaks
+the idempotency assertion.
 
 ## Configuration
 
@@ -156,5 +185,8 @@ Git identity for the dotfiles repo is read at runtime from env vars (no repo edi
 needed), with fallbacks in `group_vars/all.yml`:
 `DOTFILES_USER_NAME`, `DOTFILES_USER_EMAIL`, `DOTFILES_REPO_URL`. Empty values
 are safe — the dotfiles role skips the `config --local` steps when they're empty.
-`bootstrap.sh` honors `PROVISION_LOCAL=1` / `--local`, `PROVISION_REPO_URL`,
-`PROVISION_REPO_BRANCH`.
+Script env vars: `bootstrap.sh` honors `PROVISION_REPO_URL`,
+`PROVISION_REPO_BRANCH`, and `PROVISION_DEST` (clone location, skips the prompt);
+`update-env.sh` honors `PROVISION_ASK_BECOME_PASS=1|0` (sudo prompt) and
+`PROVISION_UPGRADE` (upgrade mode). `bootstrap.sh` forwards extra args
+(`--upgrade`, `--check`) through to `update-env.sh`.

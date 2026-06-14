@@ -12,13 +12,16 @@
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
-        cache_valid_time: 3600
+        # A cache refresh reports `changed`, which would break the steady-state
+        # changed=0 guarantee, so use a wide window by default (a default re-run
+        # within a day won't refresh). --upgrade forces a fresh cache.
+        cache_valid_time: "{{ 0 if (upgrade | bool) else 86400 }}"
 
-    # state: latest so a re-run upgrades already-installed packages.
-    - name: Install/upgrade common + Debian packages
+    # Default: state=present (install missing only, fast). Upgrade: state=latest.
+    - name: Install common + Debian packages
       ansible.builtin.apt:
         name: "{{ native_packages_common + native_packages_debian }}"
-        state: latest
+        state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
 
     # On Debian, fd ships as 'fdfind' to avoid a name clash. Provide an 'fd'
     # shim in /usr/local/bin so configs that call `fd` just work.
@@ -41,11 +44,11 @@
       # ignore failure and let the package install surface any real problem.
       failed_when: false
 
-    # state: latest so a re-run upgrades already-installed packages.
-    - name: Install/upgrade common + RedHat packages
+    # Default: state=present (install missing only, fast). Upgrade: state=latest.
+    - name: Install common + RedHat packages
       ansible.builtin.dnf:
         name: "{{ native_packages_common + native_packages_redhat }}"
-        state: latest
+        state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
 
     - name: Symlink fdfind -> fd (EL)
       ansible.builtin.file:

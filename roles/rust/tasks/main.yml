@@ -21,11 +21,14 @@
     creates: "{{ ansible_user_dir }}/.cargo/bin/rustup"
   when: not rustup_bin.stat.exists
 
-# Re-run: upgrade the existing toolchain to the latest stable.
-- name: Update Rust toolchain (upgrade on re-run)
+# Upgrade only: bump the existing toolchain to the latest stable. Skipped on a
+# default converge -- `rustup update` hits the network and is the slow part.
+- name: Update Rust toolchain (upgrade mode)
   ansible.builtin.command:
     cmd: "{{ ansible_user_dir }}/.cargo/bin/rustup update stable"
-  when: rustup_bin.stat.exists
+  when:
+    - rustup_bin.stat.exists
+    - upgrade | bool
   register: rustup_update
   changed_when: "'updated' in rustup_update.stdout or 'installed' in rustup_update.stdout"
 

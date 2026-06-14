@@ -1,6 +1,6 @@
 ---
 # common role - print an environment summary and ensure git is present
-# (needed by both ansible-pull and the dotfiles role).
+# (needed by the dotfiles role's bare-repo workflow).
 
 - name: Show detected environment
   ansible.builtin.debug:
@@ -17,6 +17,9 @@
     name: git
     state: present
     update_cache: true
+    # Wide window: a cache refresh reports `changed` and would break the
+    # steady-state changed=0 guarantee (see native_packages).
+    cache_valid_time: 86400
   when: ansible_os_family == 'Debian'
 
 - name: Ensure git is installed (RedHat)

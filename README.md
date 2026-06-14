@@ -5,8 +5,9 @@ dev machines. Peer repo to [`dotfiles`](https://github.com/jsco2t/dotfiles) —
 this repo installs **tools**; the dotfiles repo manages **config** via its
 existing bare-repo (`dot`) workflow, which this repo invokes at the end.
 
-Re-running is an **upgrade**: missing tools get installed, already-installed
-tools get bumped to their current version.
+Re-running is **fast and idempotent**: by default it installs only what's
+missing and skips everything already present. To bump already-installed tools to
+their latest versions, run the **upgrade** path (`update-env.sh --upgrade`).
 
 ## Getting started
 
@@ -32,14 +33,17 @@ On a fresh machine:
 
    # or from a local clone:
    git clone https://github.com/jsco2t/devbox-provision.git && cd devbox-provision
-   ./bootstrap.sh --local
+   ./update-env.sh
    ```
 
-That installs Ansible, then converges everything: native packages, Homebrew
-tools, Go/Rust toolchains, the Helix language tooling, and finally your
-dotfiles. Re-run the same command any time to upgrade.
+`bootstrap.sh` ensures git is present, asks where to clone the repo (default:
+`<current dir>/devbox-provision`), clones it, then hands off to the repo's
+`update-env.sh`. That installs Ansible and converges everything: native
+packages, Homebrew tools, Go/Rust toolchains, the Helix language tooling, and
+finally your dotfiles. It also drops a `~/update-env.sh` wrapper so you can
+re-converge any time with a single command.
 
-See [Usage](#usage) for re-runs, dry runs, and details.
+See [Usage](#usage) for re-runs, upgrades, dry runs, and details.
 
 ## Supported environments
 
@@ -50,8 +54,9 @@ See [Usage](#usage) for re-runs, dry runs, and details.
 
 ## Design
 
-`ansible-pull` clones this repo and runs `local.yml` against `localhost`.
-Roles run in order:
+`bootstrap.sh` clones this repo locally; `update-env.sh` then installs Ansible
+and runs `local.yml` against `localhost` (`connection: local`) — the same path
+CI exercises. Roles run in order:
 
 1. **common** — print environment summary, ensure git / Xcode CLT
 2. **native_packages** — low-level utils from `apt`/`dnf` (enables EPEL on EL)
@@ -73,8 +78,9 @@ Environment dispatch uses Ansible facts, not hand-rolled detection:
 
 ### Where each tool comes from
 
-- **Native (`apt`/`dnf`), `state: latest`:** low-level utils that rarely change
-  — `jq`, `fzf`, `ripgrep`, `fd`, `vim`, `tmux`, git, build tooling. See
+- **Native (`apt`/`dnf`):** low-level utils that rarely change — `jq`, `fzf`,
+  `ripgrep`, `fd`, `vim`, `tmux`, git, build tooling. Installed `state: present`
+  by default (`state: latest` under `--upgrade`). See
   `roles/native_packages/vars/main.yml`.
 - **Homebrew (Linux + Mac):** fast-moving tools (`bat`, `yq`, `neovim`, `helix`,
   `starship`, `eza`, `zoxide`, `git-delta`, `lazygit`, `gh`), the brew-only LSP
@@ -102,26 +108,36 @@ idempotent Ansible.
 curl -fsSL https://raw.githubusercontent.com/jsco2t/devbox-provision/main/bootstrap.sh | bash
 ```
 
-`bootstrap.sh` installs Ansible via the host's package manager (or pip), ensures
-the `community.general` collection is present, then runs `ansible-pull`.
+Ensures git, clones the repo to a location you choose (default
+`<cwd>/devbox-provision`), then runs `update-env.sh`, which installs Ansible +
+the `community.general` collection and converges the machine. Set
+`PROVISION_DEST=/path/to/dir` to skip the interactive clone-location prompt.
 
 ### Re-run / update an existing machine
 
-```bash
-ansible-pull -U https://github.com/jsco2t/devbox-provision.git -i 'localhost,' local.yml
-```
-
-or, from a local clone (runs against the working tree, no remote pull):
+After the first run there is a `~/update-env.sh` wrapper (it `cd`s into the
+clone and re-runs its `update-env.sh`):
 
 ```bash
-./bootstrap.sh --local
-# or directly:
-ansible-playbook -i 'localhost,' -c local local.yml
+~/update-env.sh             # fast converge: install only what's missing
+~/update-env.sh --upgrade   # bump every tool to its latest version
+~/update-env.sh --check     # dry run (--check --diff)
 ```
+
+Equivalently, from the clone itself: `./update-env.sh [--upgrade|--check]`.
+
+**Default vs. upgrade.** A default run is fast and idempotent — it installs
+missing tools and skips everything already present (`go`/`cargo`/`npm`/`uv`
+install tasks are guarded on the resulting binary; Homebrew and apt/dnf use
+`state: present` and skip `brew update`). `--upgrade` is the slow path: it runs
+`brew update`, `state: latest`, re-fetches the language tools at `@latest`, and
+runs `rustup update`.
 
 ### Dry run
 
 ```bash
+~/update-env.sh --check
+# or directly:
 ansible-playbook -i 'localhost,' -c local local.yml --check --diff
 ```
 
@@ -153,8 +169,12 @@ dotfiles_user_email: "{{ lookup('env', 'DOTFILES_USER_EMAIL') | default('you@exa
 
 `.github/workflows/ci.yml` runs on every push to `main` (and on demand via
 *workflow_dispatch*). It spins up a Debian container, creates an unprivileged
-user, and runs `bootstrap.sh --local` twice — proving a fresh machine converges
-and that a second run is idempotent / upgrades cleanly.
+user, and runs `update-env.sh` three times:
+
+1. **setup** — a default converge installs everything that's missing,
+2. **`--upgrade`** — exercises the bump-to-latest path,
+3. **default again** — asserts the steady-state converge reports `changed=0`
+   (the idempotency guarantee).
 
 ## Notes
 

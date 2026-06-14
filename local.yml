@@ -1,6 +1,7 @@
 ---
-# local.yml - entry playbook, designed to run against localhost via
-# ansible-pull or: ansible-playbook -i 'localhost,' -c local local.yml
+# local.yml - entry playbook, run against localhost by update-env.sh
+# (ansible-playbook -i 'localhost,' -c local local.yml). Pass -e upgrade=true
+# for the bump-to-latest path; default is install-missing-only.
 #
 # Role order matters:
 #   1. common          - gather facts, sanity-check the environment

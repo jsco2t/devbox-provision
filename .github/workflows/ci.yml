@@ -51,30 +51,50 @@ jobs:
           chmod 0440 /etc/sudoers.d/dev
           chown -R dev:dev "$GITHUB_WORKSPACE"
 
-      # Exercises bootstrap.sh end to end against this checkout: it installs
-      # Ansible + the community.general collection, then converges local.yml.
-      - name: Bootstrap + converge
+      # Run 1 - setup: a default (fast) converge installs Ansible + the
+      # community.general collection, then installs everything that is missing.
+      # This is the heavy first run (compiles the go/cargo tools from source).
+      - name: Setup environment (update-env.sh)
         run: |
           set -eux
           sudo -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-            PROVISION_LOCAL=1 \
             DOTFILES_USER_NAME="CI Tester" \
             DOTFILES_USER_EMAIL="ci@example.com" \
-            bash "$GITHUB_WORKSPACE/bootstrap.sh"
+            bash "$GITHUB_WORKSPACE/update-env.sh"
 
-      # A second converge exercises the upgrade-on-rerun path end to end and
-      # confirms it completes without error. Note: several tasks (go install,
-      # cargo --force, brew state: latest) are intentionally always-changed, so
-      # this is not a zero-change idempotency assertion.
-      - name: Re-converge (upgrade-on-rerun path)
+      # Run 2 - upgrade: exercises the --upgrade path (brew update + state:latest,
+      # go/cargo re-fetch @latest, rustup update). Several tasks are intentionally
+      # always-changed here, so this is not an idempotency assertion -- it just
+      # proves the upgrade path completes without error.
+      - name: Upgrade pass (update-env.sh --upgrade)
         run: |
           set -eux
           sudo -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-            PROVISION_LOCAL=1 \
             DOTFILES_USER_NAME="CI Tester" \
             DOTFILES_USER_EMAIL="ci@example.com" \
-            bash "$GITHUB_WORKSPACE/bootstrap.sh"
+            bash "$GITHUB_WORKSPACE/update-env.sh" --upgrade
+
+      # Run 3 - idempotency: a default converge after everything is present must
+      # report changed=0 for the install tasks (the `creates`/state:present guards
+      # skip already-installed tools). We assert the recap shows no changes.
+      - name: Idempotency check (update-env.sh, expect changed=0)
+        run: |
+          set -euxo pipefail
+          sudo -u dev env \
+            HOME=/home/dev \
+            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            DOTFILES_USER_NAME="CI Tester" \
+            DOTFILES_USER_EMAIL="ci@example.com" \
+            bash "$GITHUB_WORKSPACE/update-env.sh" 2>&1 | tee /tmp/converge3.log
+          # Fail if any host reports a non-zero changed count in the PLAY RECAP.
+          # Isolate the recap lines first (they contain 'unreachable=') so a
+          # --diff content line can't false-match 'changed=N'.
+          if grep 'unreachable=' /tmp/converge3.log | grep -E 'changed=[1-9]'; then
+            echo "::error::Third converge was not idempotent (changed > 0 above)."
+            exit 1
+          fi
+          echo "Idempotent: no changes on the steady-state converge."

@@ -1,11 +1,18 @@
 ---
-# `go install <pkg>@latest` builds and installs the latest version every time,
-# so a re-run is an upgrade. Reports changed always (go install is quiet and
-# gives no reliable "already up to date" signal).
-- name: go install tools
+# Default: install a tool only if its binary is missing from ~/go/bin (the
+# `creates` guard skips ones already built -- this is the fast path). Upgrade:
+# `creates` is omitted so every tool is re-fetched at @latest and rebuilt.
+#
+# Binary name == basename of the package path for every tool in the list
+# (e.g. github.com/go-delve/delve/cmd/dlv -> dlv), so we can derive the guard.
+#
+# No changed_when: the command module already reports `changed` when it actually
+# runs and `ok` when `creates` skips it -- exactly the semantics we want.
+- name: Install Go tools (skip if already built; --upgrade re-fetches @latest)
   ansible.builtin.command:
     cmd: "go install {{ item }}@latest"
+  args:
+    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/go/bin/' ~ (item | basename) }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_go }}"
-  changed_when: true

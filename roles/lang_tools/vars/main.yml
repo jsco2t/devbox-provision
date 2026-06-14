@@ -22,19 +22,25 @@ lang_tools_go:
   # functionally complete.
   - github.com/hashicorp/terraform-ls
 
-# Cargo crates from crates.io: `cargo install --locked --force` (force =
-# always rebuild to the latest published version on re-run).
+# Cargo crates from crates.io. `bin` is the installed binary name in
+# ~/.cargo/bin, used as the skip-if-present guard on a default converge (it can
+# differ from the crate name, e.g. taplo-cli installs `taplo`). A wrong `bin`
+# only costs a rebuild, never breakage. Upgrade mode rebuilds via --force.
 lang_tools_cargo:
   - name: taplo-cli
+    bin: taplo
     extra_args: "--features lsp"
   - name: harper-ls
+    bin: harper-ls
     extra_args: ""
   - name: dprint
+    bin: dprint
     extra_args: ""
 
 # Cargo crates installed from a git source (not on crates.io).
 lang_tools_cargo_git:
   - name: markdown-oxide
+    bin: markdown-oxide
     repo: "https://github.com/Feel-ix-343/markdown-oxide.git"
 
 # npm global packages: `npm i -g <pkg>` (always installs latest = upgrade).
@@ -48,7 +54,10 @@ lang_tools_npm:
   - markdownlint-cli
   - prettier
 
-# Python tools via uv (isolated per-tool venvs).
+# Python tools via uv (isolated per-tool venvs). `bin` is the entry-point shim
+# uv drops in ~/.local/bin, used as the skip-if-present guard on a default run.
 lang_tools_python:
-  - python-lsp-server
-  - black
+  - name: python-lsp-server
+    bin: pylsp
+  - name: black
+    bin: black

@@ -1,24 +1,30 @@
 ---
-# crates.io crates. --force rebuilds to the latest published version on every
-# run (install if missing, upgrade if present). --locked uses the crate's
-# pinned Cargo.lock for reproducible builds.
-- name: cargo install (crates.io)
+# Default: install a crate only if its binary is missing from ~/.cargo/bin (the
+# `creates` guard skips already-built crates -- the slow Rust compiles only run
+# once). Upgrade: `creates` is omitted and --force rebuilds to the latest
+# published version. --locked uses the crate's pinned Cargo.lock.
+#
+# No changed_when: the command module reports `changed` when it runs and `ok`
+# when `creates` skips it.
+- name: cargo install (crates.io; --upgrade rebuilds latest)
   ansible.builtin.command:
-    cmd: "cargo install --locked --force {{ item.name }} {{ item.extra_args }}"
+    cmd: "cargo install --locked {{ '--force' if (upgrade | bool) else '' }} {{ item.name }} {{ item.extra_args }}"
+  args:
+    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.cargo/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_cargo }}"
   loop_control:
     label: "{{ item.name }}"
-  changed_when: true
 
 # git-source crates (not published to crates.io).
-- name: cargo install (git source)
+- name: cargo install (git source; --upgrade rebuilds latest)
   ansible.builtin.command:
-    cmd: "cargo install --locked --force --git {{ item.repo }} {{ item.name }}"
+    cmd: "cargo install --locked {{ '--force' if (upgrade | bool) else '' }} --git {{ item.repo }} {{ item.name }}"
+  args:
+    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.cargo/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_cargo_git }}"
   loop_control:
     label: "{{ item.name }}"
-  changed_when: true

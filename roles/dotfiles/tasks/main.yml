@@ -73,13 +73,33 @@
 # Reset to FETCH_HEAD (written by the fetch above), NOT origin/{{ dotfiles_branch }}:
 # `git clone --bare` does not create remote-tracking refs (refs/remotes/origin/*),
 # so `origin/main` does not exist. FETCH_HEAD is the tip we just fetched.
+- name: Resolve current dotfiles worktree HEAD
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      rev-parse HEAD
+  register: dot_head
+  changed_when: false
+  failed_when: false
+
+- name: Resolve fetched dotfiles tip
+  ansible.builtin.command:
+    cmd: >-
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      rev-parse FETCH_HEAD
+  register: dot_fetch_tip
+  changed_when: false
+
 - name: Apply dotfiles (reset --hard to fetched tip)
   ansible.builtin.command:
     cmd: >-
       git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
       reset --hard FETCH_HEAD
   register: dot_reset
-  changed_when: "'HEAD is now at' in dot_reset.stdout"
+  # `git reset --hard` always prints "HEAD is now at ...", so keying changed on
+  # its output marks EVERY run changed. Compare HEAD to the fetched tip instead,
+  # so a steady-state converge (already at the tip) honestly reports changed=0.
+  changed_when: (dot_head.stdout | default('')) != dot_fetch_tip.stdout
 
 - name: Show applied dotfiles HEAD
   ansible.builtin.debug:

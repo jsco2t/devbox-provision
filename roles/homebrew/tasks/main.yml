@@ -61,19 +61,21 @@
   ansible.builtin.set_fact:
     brew_bin_dir: "{{ brew_prefix }}/bin"
 
-# state: latest + update_homebrew: true means a re-run upgrades installed
-# formulae as well as installing any that are missing. On macOS we also pull in
-# the low-level utils that Linux gets from its native package manager.
+# Default (upgrade=false): state=present + update_homebrew=false. This is the
+# key speedup -- it skips `brew update` (a full git-fetch of homebrew-core on
+# every run) and only installs formulae that are missing. Upgrade mode runs
+# `brew update` and state=latest to bump everything.
 #
-# Everything here lives in homebrew-core (trusted by default); no third-party
-# taps are used, so there is no tap-trust gate to work around.
-- name: Install/upgrade Homebrew formulae
+# On macOS we also pull in the low-level utils that Linux gets from its native
+# package manager. Everything here lives in homebrew-core (trusted by default);
+# no third-party taps are used, so there is no tap-trust gate to work around.
+- name: Install Homebrew formulae (upgrade bumps to latest)
   community.general.homebrew:
     name: >-
       {{ homebrew_formulae
          + (homebrew_formulae_darwin if ansible_system == 'Darwin' else []) }}
-    state: latest
-    update_homebrew: true
+    state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
+    update_homebrew: "{{ upgrade | bool }}"
     path: "{{ brew_bin_dir }}"
 
 - name: Reminder to add brew to shell init (Linux)

@@ -1,12 +1,21 @@
 ---
-# uv installs each tool in an isolated venv. Mirror the reference deps.sh:
-# try to upgrade (no-op/fails cleanly if not yet installed) and fall back to a
-# fresh install. This gives install-if-missing + upgrade-on-rerun in one step.
-- name: uv tool install/upgrade
+# uv installs each tool in an isolated venv, dropping entry-point shims in
+# ~/.local/bin. Default: install only if the shim is missing (the `creates`
+# guard -- fast, idempotent). Upgrade: `creates` is omitted and `uv tool
+# upgrade` bumps to the latest (falling back to install if not yet present).
+#
+# No changed_when: the shell module reports `changed` when it runs and `ok` when
+# `creates` skips it.
+- name: uv tool install (skip if present; --upgrade bumps to latest)
   ansible.builtin.shell:
-    cmd: "uv tool upgrade {{ item }} 2>/dev/null || uv tool install {{ item }}"
+    cmd: >-
+      {{ ('uv tool upgrade ' ~ item.name ~ ' 2>/dev/null || uv tool install ' ~ item.name)
+         if (upgrade | bool)
+         else ('uv tool install ' ~ item.name) }}
+  args:
+    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.local/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_python }}"
-  register: uv_result
-  changed_when: "'Nothing to upgrade' not in uv_result.stdout and 'already installed' not in uv_result.stdout"
+  loop_control:
+    label: "{{ item.name }}"

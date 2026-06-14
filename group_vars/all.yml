@@ -1,5 +1,16 @@
 # group_vars/all.yml - values shared across all roles.
 #
+# upgrade: the master switch between the two converge modes.
+#   false (default) -> "ensure present": install only what is MISSING and skip
+#                      anything already installed. Fast and idempotent; a re-run
+#                      on a converged machine does almost no work.
+#   true            -> "upgrade": bump every tool to its latest version (brew
+#                      update + state=latest, go/cargo/npm re-fetch @latest,
+#                      rustup update). This is the slow path -- opt in with
+#                      `update-env.sh --upgrade` (sets `-e upgrade=true`).
+upgrade: "{{ (lookup('env', 'PROVISION_UPGRADE') | default('false', true)) | bool }}"
+
+#
 # Your git identity for the dotfiles bare repo (written with `config --local`
 # to the bare repo only; it does not touch global git config). It mirrors what
 # the original .dotsetup.sh did.
