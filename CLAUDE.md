@@ -112,7 +112,14 @@ The split is deliberate — match it when adding tools:
   Note the `fdfind`→`fd` symlink shim on Debian/EL.
 - **Homebrew (Linux + macOS)** — fast-moving tools + the brew-only LSPs +
   node/uv toolchains. Lists in `roles/homebrew/vars/main.yml`. Only
-  homebrew-core; no third-party taps (avoids tap-trust gates).
+  homebrew-core; no third-party taps (avoids tap-trust gates). On **Linux** the
+  role pre-creates the `/home/linuxbrew/.linuxbrew` prefix as root and chowns it
+  to the invoking user *before* running the installer — the installer's own sudo
+  can't authenticate under Ansible (no TTY, no become password passed to the
+  shell), but a pre-owned, writable prefix makes it skip sudo entirely (see the
+  `! [[ -w "${HOMEBREW_PREFIX}" ]] && ... && ! have_sudo_access` gate in
+  install.sh). The install task is guarded (`brew_check.rc != 0` **and** prefix
+  binary absent), so it doesn't re-run once brew exists.
 - **lang_tools** — the Helix tooling, by ecosystem, in `roles/lang_tools/vars/main.yml`:
   `lang_tools_go` (`go install ...@latest`), `lang_tools_cargo` /
   `lang_tools_cargo_git` (`cargo install --locked --force`), `lang_tools_npm`

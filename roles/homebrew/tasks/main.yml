@@ -21,6 +21,28 @@
     path: "{{ brew_prefix }}/bin/brew"
   register: brew_bin
 
+# On Linux the install prefix is /home/linuxbrew/.linuxbrew, but /home is
+# root-owned, so the installer needs root to create it. It tries to do that with
+# its own `sudo`, which fails here: Ansible runs the install shell without a TTY
+# and does not feed it the become password, so the installer's sudo cannot
+# authenticate ("Insufficient permissions to install Homebrew..."). We instead
+# create the prefix as root ourselves and hand it to the invoking user. The
+# installer then sees a writable prefix and never needs sudo. (macOS is left to
+# the installer: its prefixes -- /opt/homebrew, /usr/local -- have their own
+# ownership conventions we should not blanket-chown.)
+- name: Pre-create Homebrew prefix owned by the invoking user (Linux)
+  become: true
+  ansible.builtin.file:
+    path: "{{ brew_prefix }}"
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    mode: "0755"
+    recurse: true
+  when:
+    - ansible_system == 'Linux'
+    - brew_check.rc != 0
+    - not brew_bin.stat.exists
+
 - name: Install Homebrew (non-interactive)
   ansible.builtin.shell: >-
     /bin/bash -c "$(curl -fsSL
