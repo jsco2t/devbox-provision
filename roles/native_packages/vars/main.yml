@@ -18,15 +18,27 @@ native_packages_common:
   - ca-certificates
   - vim
   - tmux
+  # Also pulled in by the dev toolchain (build-essential / @Development Tools);
+  # listed explicitly so `make` is a guaranteed dependency on its own.
+  - make
 
 # Debian/Ubuntu-specific names.
 native_packages_debian:
+  # Developer toolchain. build-essential = gcc/g++/make/libc-dev/dpkg-dev; the
+  # autotools + pkg-config bring Debian to parity with the dnf "@Development
+  # Tools" group (which already bundles these on RedHat).
   - build-essential
+  - pkg-config
+  - autoconf
+  - automake
+  - libtool
   - fd-find          # binary is 'fdfind' on Debian; symlink handled below
   - ripgrep
 
 # RedHat/EL-specific names (require EPEL for several of these).
 native_packages_redhat:
-  - "@Development Tools"   # group: compilers, make, etc.
+  # "@Development Tools" group: compilers, make, autoconf/automake/libtool,
+  # pkg-config, etc. -- the RedHat equivalent of build-essential + autotools.
+  - "@Development Tools"
   - fd-find
   - ripgrep

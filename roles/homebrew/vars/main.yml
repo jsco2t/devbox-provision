@@ -22,6 +22,9 @@ homebrew_formulae:
   - helix
   - starship
   - btop
+  - yazi
+  - direnv
+  - pre-commit
 
   # Extras (kept by user request).
   - eza
