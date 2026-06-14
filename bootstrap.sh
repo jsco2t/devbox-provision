@@ -22,7 +22,11 @@ err() { printf '\033[1;31m[bootstrap:error]\033[0m %s\n' "$*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the script's own directory. When invoked via `curl ... | bash` the
+# script comes from stdin and BASH_SOURCE[0] is unset, which trips `set -u`;
+# fall back to $0. SCRIPT_DIR is only actually used in --local mode (where the
+# script is a real file), so the fallback value is harmless for the pull path.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
 
 # Run against the local checkout instead of pulling from GitHub. Set via the
 # --local flag or PROVISION_LOCAL=1 (used by CI and when iterating locally).
@@ -71,6 +75,42 @@ install_ansible() {
       ;;
     *)
       err "Unsupported OS: $uname_s (Linux and macOS only)"
+      exit 1
+      ;;
+  esac
+}
+
+# ansible-pull clones this repo with git BEFORE any role runs, so git must be
+# present up front -- the `common` role's git install is too late for the pull
+# path. (The --local path doesn't need this: the user already has a git clone.)
+ensure_git() {
+  if have git; then
+    return 0
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      # git ships with the Xcode command line tools; we can't silently install
+      # those (GUI installer). Point the user at it -- the common role checks
+      # for CLT too, but we need git earlier than that for the pull.
+      err "git not found. Run 'xcode-select --install', then re-run."
+      exit 1
+      ;;
+    Linux)
+      if have apt-get; then
+        log "installing git via apt"
+        sudo apt-get update -y
+        sudo apt-get install -y git
+      elif have dnf; then
+        log "installing git via dnf"
+        sudo dnf install -y git
+      else
+        err "git not found and no supported installer (apt/dnf). Install git and re-run."
+        exit 1
+      fi
+      ;;
+    *)
+      err "git not found. Install git and re-run."
       exit 1
       ;;
   esac
@@ -126,6 +166,7 @@ main() {
   if [[ -n "$LOCAL_MODE" ]]; then
     run_local "$@"
   else
+    ensure_git
     run_pull "$@"
   fi
   log "done."
