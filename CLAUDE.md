@@ -76,6 +76,16 @@ refuses to run as root; go/cargo/npm/uv install into `$HOME`). When adding tasks
 add `become: true` only to things that genuinely need root, never a blanket
 escalation.
 
+Because those tasks escalate via sudo, `bootstrap.sh` must satisfy sudo before
+invoking Ansible. `detect_become_args()` probes this and passes
+`--ask-become-pass` to ansible-pull/ansible-playbook when sudo needs a password
+(both passwordless-NOPASSWD and password-prompt hosts are supported; the latter
+needs a TTY, which `curl | bash` has over SSH). The probe runs `sudo -k` first
+so it reads the sudo *policy*, not a cached credential left by an earlier sudo in
+the script. Override with `PROVISION_ASK_BECOME_PASS=1|0`. On a password-prompt
+host the pull path prompts twice — once for `ensure_git`'s apt/dnf install, once
+for Ansible — because the two use independent sudo sessions.
+
 **2. PATH is hand-composed, not inherited.** A freshly installed brew/rustup/etc.
 is **not on the Ansible session's PATH**. So:
 

@@ -129,6 +129,49 @@ ensure_collections() {
   ansible-galaxy collection install community.general
 }
 
+# The playbook escalates to root per-task via sudo (apt/dnf installs). Work out
+# how to satisfy that and stash the right flags in BECOME_ARGS:
+#   - already root, or no sudo binary  -> nothing to add
+#   - passwordless sudo (NOPASSWD)     -> nothing to add
+#   - sudo needs a password            -> --ask-become-pass (Ansible prompts on
+#                                         /dev/tty, which works under curl|bash)
+#   - password needed but no TTY       -> fail with guidance (can't prompt)
+#
+# PROVISION_ASK_BECOME_PASS overrides the probe: 1 forces the prompt, 0 disables
+# it (e.g. for a non-interactive run you know is passwordless).
+#
+# NOTE: we `sudo -k` before probing on purpose. An earlier `sudo` in this script
+# (e.g. ensure_git's apt install) may have cached a credential, which would make
+# `sudo -n true` succeed even on a password-required host and hide the real
+# config. Clearing the timestamp first tests the policy, not the cache.
+BECOME_ARGS=()
+detect_become_args() {
+  case "${PROVISION_ASK_BECOME_PASS:-}" in
+    1) BECOME_ARGS=(--ask-become-pass); log "sudo password prompt forced via PROVISION_ASK_BECOME_PASS=1"; return 0 ;;
+    0) log "sudo password prompt disabled via PROVISION_ASK_BECOME_PASS=0"; return 0 ;;
+  esac
+
+  if [[ "$(id -u)" -eq 0 ]] || ! have sudo; then
+    return 0
+  fi
+
+  sudo -k 2>/dev/null || true
+  if sudo -n true 2>/dev/null; then
+    log "passwordless sudo detected"
+    return 0
+  fi
+
+  if [[ -r /dev/tty ]]; then
+    log "sudo requires a password; Ansible will prompt for it"
+    BECOME_ARGS=(--ask-become-pass)
+  else
+    err "sudo requires a password but no terminal is attached to prompt on."
+    err "Re-run from an interactive shell, or configure passwordless sudo,"
+    err "or set PROVISION_ASK_BECOME_PASS=0 if escalation is already handled."
+    exit 1
+  fi
+}
+
 run_pull() {
   log "running ansible-pull from $REPO_URL ($REPO_BRANCH)"
   # -U: repo, -C: branch, -i: inventory (localhost), running local.yml.
@@ -139,6 +182,7 @@ run_pull() {
     --checkout "$REPO_BRANCH" \
     --inventory "localhost," \
     --diff \
+    "${BECOME_ARGS[@]+"${BECOME_ARGS[@]}"}" \
     "$PLAYBOOK" \
     "$@"
 }
@@ -149,6 +193,7 @@ run_local() {
     --inventory "localhost," \
     --connection local \
     --diff \
+    "${BECOME_ARGS[@]+"${BECOME_ARGS[@]}"}" \
     "$SCRIPT_DIR/$PLAYBOOK" \
     "$@"
 }
@@ -163,6 +208,7 @@ main() {
   install_ansible
   hash -r
   ensure_collections
+  detect_become_args
   if [[ -n "$LOCAL_MODE" ]]; then
     run_local "$@"
   else
