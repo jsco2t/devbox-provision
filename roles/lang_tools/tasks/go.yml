@@ -15,4 +15,10 @@
     creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/go/bin/' ~ (item | basename) }}"
   environment:
     PATH: "{{ lang_tools_path }}"
+    # helm-ls pulls in CGO tree-sitter bindings (smacker/go-tree-sitter); with
+    # CGO disabled their cgo-gated files are excluded and the build fails with
+    # "undefined: Node". Force it on -- a C compiler is guaranteed by the
+    # build-essential / @Development Tools / Xcode CLT installs that run first.
+    # Harmless for the pure-Go tools (they never invoke the compiler).
+    CGO_ENABLED: "1"
   loop: "{{ lang_tools_go }}"
