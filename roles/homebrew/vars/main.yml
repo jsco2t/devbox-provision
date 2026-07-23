@@ -32,6 +32,7 @@ homebrew_formulae:
   - git-delta
   - lazygit
   - gh
+  - herdr
 
   # LSP tooling with no language-native installer (from the helix deps set).
   # NOTE: terraform-ls is NOT here -- it lives in hashicorp/tap, a third-party
