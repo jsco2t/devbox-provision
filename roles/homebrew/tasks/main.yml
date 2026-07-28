@@ -61,22 +61,65 @@
   ansible.builtin.set_fact:
     brew_bin_dir: "{{ brew_prefix }}/bin"
 
-# Default (upgrade=false): state=present + update_homebrew=false. This is the
-# key speedup -- it skips `brew update` (a full git-fetch of homebrew-core on
-# every run) and only installs formulae that are missing. Upgrade mode runs
-# `brew update` and state=latest to bump everything.
+# community.general.homebrew 6.x detects installed state by scraping
+# `brew info` text output for "Poured from bottle" / "Built from source".
+# Homebrew 6+ changed that output, breaking detection for every formula. The
+# fix (JSON-based detection) landed in community.general 7.0.0, but rather
+# than pinning a specific collection version range (7.x-9.x for ansible-core
+# 2.14 compat), we drive brew directly: `brew list --formula` and
+# `brew outdated --formula` are stable, machine-readable APIs that won't
+# break across brew or collection releases.
 #
 # On macOS we also pull in the low-level utils that Linux gets from its native
 # package manager. Everything here lives in homebrew-core (trusted by default);
 # no third-party taps are used, so there is no tap-trust gate to work around.
-- name: Install Homebrew formulae (upgrade bumps to latest)
-  community.general.homebrew:
-    name: >-
+
+- name: Gather installed Homebrew formulae
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew list --formula"
+  register: brew_installed
+  changed_when: false
+  check_mode: false
+
+- name: Build list of wanted formulae
+  ansible.builtin.set_fact:
+    brew_wanted: >-
       {{ homebrew_formulae
          + (homebrew_formulae_darwin if ansible_system == 'Darwin' else []) }}
-    state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
-    update_homebrew: "{{ upgrade | bool }}"
-    path: "{{ brew_bin_dir }}"
+
+- name: Compute missing formulae
+  ansible.builtin.set_fact:
+    brew_missing: "{{ brew_wanted | difference(brew_installed.stdout_lines) }}"
+
+# Default (upgrade=false): install only what is missing. A steady-state
+# converge produces changed=0 because the loop body never executes.
+- name: Install missing Homebrew formulae
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew install {{ item }}"
+  loop: "{{ brew_missing }}"
+  when: not (upgrade | bool)
+
+# Upgrade (upgrade=true): refresh the formula index, then install anything
+# missing and upgrade anything outdated.
+- name: Update Homebrew formula index
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew update"
+  when: upgrade | bool
+  changed_when: false
+
+- name: Install missing Homebrew formulae (upgrade path)
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew install {{ item }}"
+  loop: "{{ brew_missing }}"
+  when: upgrade | bool
+
+- name: Gather outdated Homebrew formulae
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew outdated --formula"
+  register: brew_outdated
+  changed_when: false
+  check_mode: false
+  when: upgrade | bool
+
+- name: Upgrade outdated Homebrew formulae
+  ansible.builtin.command: "{{ brew_bin_dir }}/brew upgrade {{ item }}"
+  loop: "{{ brew_wanted | intersect(brew_outdated.stdout_lines | default([])) }}"
+  when: upgrade | bool
 
 - name: Reminder to add brew to shell init (Linux)
   ansible.builtin.debug:

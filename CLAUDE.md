@@ -98,7 +98,9 @@ is **not on the Ansible session's PATH**. So:
 
 - `homebrew` computes `brew_prefix` from facts (`/opt/homebrew` on Apple
   Silicon, `/usr/local` on Intel mac, `/home/linuxbrew/.linuxbrew` on Linux) and
-  passes `path:` explicitly to the `community.general.homebrew` module.
+  uses `{{ brew_bin_dir }}/brew` explicitly in all command tasks (the
+  `community.general.homebrew` module is not used — its text-scraping
+  installed-detection is broken against Homebrew 6+).
 - `lang_tools` builds `lang_tools_path` (`~/.cargo/bin:~/go/bin:~/.local/bin:<brew>/bin:$PATH`)
   and passes it via `environment:` to every install task. New language tooling
   must run under this PATH or it won't find its toolchain.
@@ -162,19 +164,23 @@ There are **two converge modes**, switched by the `upgrade` var (default
 
 - **Default (`upgrade=false`) — fast & idempotent.** Install only what's
   missing; skip everything present. A steady-state converge must report
-  **`changed=0`** (CI's third run asserts this). Mechanism: `state: present` +
-  `update_homebrew: false` (no `brew update`); apt/dnf `state: present`; the
+  **`changed=0`** (CI's third run asserts this). Mechanism: the homebrew and
+  golang roles use `brew list --formula` to detect what's installed and only
+  run `brew install` on missing formulae; apt/dnf use `state: present`; the
   language-tool tasks use `creates:` guards on the resulting binary so
   already-built tools are skipped; `rustup update` is skipped. The one task that
   needs care to stay at `changed=0` is the dotfiles `reset --hard` — it keys
   `changed_when` on HEAD-vs-fetched-tip, not on the always-present "HEAD is now
   at" output.
-- **Upgrade (`upgrade=true`) — slow.** `brew update` + `state: latest`,
+- **Upgrade (`upgrade=true`) — slow.** `brew update` + `brew outdated` to find
+  what needs upgrading, then `brew upgrade` on outdated wanted formulae;
   go/cargo/npm re-fetch `@latest` (cargo adds `--force`, `creates` omitted),
   `rustup update`. Intentionally re-does work; **not** a zero-change run.
 
-When adding a tool, wire it into **both** modes: a `state:`/`update_homebrew:`
-that flips on `upgrade`, or a `creates:` guard of the form
+When adding a Homebrew formula, add it to the list in
+`roles/homebrew/vars/main.yml` — the role handles both modes automatically via
+`brew list`/`brew outdated` detection. For language tools, wire into **both**
+modes with a `creates:` guard of the form
 `{{ omit if (upgrade | bool) else <binary path> }}`. Do **not** reintroduce
 unconditional `changed_when: true` / `--force` on the default path — it breaks
 the idempotency assertion.
