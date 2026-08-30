@@ -25,6 +25,7 @@ homebrew_formulae:
   - yazi
   - direnv
   - pre-commit
+  - herdr
 
   # Extras (kept by user request).
   - eza
