@@ -15,7 +15,7 @@
 
 - name: Ensure .dotfiles and .dotsetup.sh are gitignored in $HOME
   ansible.builtin.lineinfile:
-    path: "{{ ansible_user_dir }}/.gitignore"
+    path: "{{ ansible_facts['user_dir'] }}/.gitignore"
     line: "{{ item }}"
     create: true
     mode: "0644"
@@ -39,14 +39,14 @@
 - name: Configure bare repo - hide untracked files
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       config --local status.showUntrackedFiles no
   changed_when: false
 
 - name: Configure bare repo - user.name
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       config --local user.name "{{ dotfiles_user_name }}"
   when: dotfiles_user_name | length > 0
   changed_when: false
@@ -54,7 +54,7 @@
 - name: Configure bare repo - user.email
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       config --local user.email "{{ dotfiles_user_email }}"
   when: dotfiles_user_email | length > 0
   changed_when: false
@@ -62,7 +62,7 @@
 - name: Fetch latest dotfiles
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       fetch origin {{ dotfiles_branch }}
   changed_when: false
 
@@ -76,7 +76,7 @@
 - name: Resolve current dotfiles worktree HEAD
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       rev-parse HEAD
   register: dot_head
   changed_when: false
@@ -85,7 +85,7 @@
 - name: Resolve fetched dotfiles tip
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       rev-parse FETCH_HEAD
   register: dot_fetch_tip
   changed_when: false
@@ -93,7 +93,7 @@
 - name: Apply dotfiles (reset --hard to fetched tip)
   ansible.builtin.command:
     cmd: >-
-      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_user_dir }}
+      git --git-dir={{ dotfiles_git_dir }} --work-tree={{ ansible_facts['user_dir'] }}
       reset --hard FETCH_HEAD
   register: dot_reset
   # `git reset --hard` always prints "HEAD is now at ...", so keying changed on

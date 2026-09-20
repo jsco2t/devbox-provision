@@ -27,19 +27,19 @@
     - name: Assert we are on a supported OS
       ansible.builtin.assert:
         that:
-          - ansible_system in ['Linux', 'Darwin']
+          - ansible_facts['system'] in ['Linux', 'Darwin']
         fail_msg: >-
-          Unsupported system '{{ ansible_system }}'.
+          Unsupported system '{{ ansible_facts['system'] }}'.
           This playbook supports Linux and macOS only.
 
     - name: Assert Linux is a supported family
       ansible.builtin.assert:
         that:
-          - ansible_os_family in ['Debian', 'RedHat']
+          - ansible_facts['os_family'] in ['Debian', 'RedHat']
         fail_msg: >-
-          Unsupported Linux family '{{ ansible_os_family }}'.
+          Unsupported Linux family '{{ ansible_facts['os_family'] }}'.
           Supported: Debian, RedHat (Enterprise Linux).
-      when: ansible_system == 'Linux'
+      when: ansible_facts['system'] == 'Linux'
 
   roles:
     - role: common

@@ -72,7 +72,7 @@ Representative role logic:
     chdir: "{{ oom_edit_source_dir }}"
     creates: "{{ omit if (upgrade | bool) else oom_edit_release_binary }}"
   environment:
-    PATH: "{{ ansible_user_dir }}/.cargo/bin:{{ ansible_env.PATH }}"
+    PATH: "{{ ansible_facts['user_dir'] }}/.cargo/bin:{{ ansible_facts['env']['PATH'] }}"
 ```
 
 The role must also create `~/.local/bin` before cloning and manage the absolute symlink with `ansible.builtin.file`. Do not use `force: true`; an unrelated existing file at `~/.local/bin/oom-edit` should cause a visible failure rather than be overwritten. Guard build/link behavior on a fresh `--check` run so check mode does not fail merely because the predicted clone directory is not yet present.

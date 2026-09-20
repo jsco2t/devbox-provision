@@ -12,7 +12,7 @@
   ansible.builtin.command:
     cmd: "go install {{ item }}@latest"
   args:
-    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/go/bin/' ~ (item | basename) }}"
+    creates: "{{ omit if (upgrade | bool) else ansible_facts['user_dir'] ~ '/go/bin/' ~ (item | basename) }}"
   environment:
     PATH: "{{ lang_tools_path }}"
     # helm-ls pulls in CGO tree-sitter bindings (smacker/go-tree-sitter); with

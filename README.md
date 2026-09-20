@@ -75,9 +75,9 @@ Environment dispatch uses Ansible facts, not hand-rolled detection:
 
 | Fact | Drives |
 |------|--------|
-| `ansible_system` (`Linux`/`Darwin`) | brew prefix, native-vs-brew split |
-| `ansible_os_family` (`Debian`/`RedHat`) | `apt` vs `dnf`, EPEL |
-| `ansible_architecture` | Homebrew prefix (`/opt/homebrew` vs `/usr/local`) |
+| `ansible_facts['system']` (`Linux`/`Darwin`) | brew prefix, native-vs-brew split |
+| `ansible_facts['os_family']` (`Debian`/`RedHat`) | `apt` vs `dnf`, EPEL |
+| `ansible_facts['architecture']` | Homebrew prefix (`/opt/homebrew` vs `/usr/local`) |
 
 ### Where each tool comes from
 

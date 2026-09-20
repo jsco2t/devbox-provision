@@ -6,8 +6,8 @@
 - name: Determine Homebrew prefix
   ansible.builtin.set_fact:
     brew_prefix: >-
-      {{ '/opt/homebrew' if (ansible_system == 'Darwin' and ansible_architecture == 'arm64')
-         else '/usr/local' if ansible_system == 'Darwin'
+      {{ '/opt/homebrew' if (ansible_facts['system'] == 'Darwin' and ansible_facts['architecture'] == 'arm64')
+         else '/usr/local' if ansible_facts['system'] == 'Darwin'
          else '/home/linuxbrew/.linuxbrew' }}
 
 - name: Check whether brew is already on PATH
@@ -35,11 +35,11 @@
   ansible.builtin.file:
     path: "{{ brew_prefix }}"
     state: directory
-    owner: "{{ ansible_user_id }}"
+    owner: "{{ ansible_facts['user_id'] }}"
     mode: "0755"
     recurse: true
   when:
-    - ansible_system == 'Linux'
+    - ansible_facts['system'] == 'Linux'
     - brew_check.rc != 0
     - not brew_bin.stat.exists
 
@@ -84,7 +84,7 @@
   ansible.builtin.set_fact:
     brew_wanted: >-
       {{ homebrew_formulae
-         + (homebrew_formulae_darwin if ansible_system == 'Darwin' else []) }}
+         + (homebrew_formulae_darwin if ansible_facts['system'] == 'Darwin' else []) }}
 
 - name: Compute missing formulae
   ansible.builtin.set_fact:
@@ -126,4 +126,4 @@
     msg: >-
       Ensure your dotfiles eval the brew shellenv on Linux:
       eval "$({{ brew_prefix }}/bin/brew shellenv)"
-  when: ansible_system == 'Linux'
+  when: ansible_facts['system'] == 'Linux'

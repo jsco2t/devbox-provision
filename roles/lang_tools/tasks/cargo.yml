@@ -10,7 +10,7 @@
   ansible.builtin.command:
     cmd: "cargo install --locked {{ '--force' if (upgrade | bool) else '' }} {{ item.name }} {{ item.extra_args }}"
   args:
-    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.cargo/bin/' ~ item.bin }}"
+    creates: "{{ omit if (upgrade | bool) else ansible_facts['user_dir'] ~ '/.cargo/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_cargo }}"
@@ -22,7 +22,7 @@
   ansible.builtin.command:
     cmd: "cargo install --locked {{ '--force' if (upgrade | bool) else '' }} --git {{ item.repo }} {{ item.name }}"
   args:
-    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.cargo/bin/' ~ item.bin }}"
+    creates: "{{ omit if (upgrade | bool) else ansible_facts['user_dir'] ~ '/.cargo/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_cargo_git }}"

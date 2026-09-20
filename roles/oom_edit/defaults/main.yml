@@ -4,6 +4,6 @@
 
 oom_edit_repo_url: "https://github.com/jsco2t/oom-edit.git"
 oom_edit_repo_version: "main"
-oom_edit_source_dir: "{{ ansible_user_dir }}/.local/bin/oom-edit-src"
+oom_edit_source_dir: "{{ ansible_facts['user_dir'] }}/.local/bin/oom-edit-src"
 oom_edit_release_binary: "{{ oom_edit_source_dir }}/target/release/oom-edit"
-oom_edit_link_path: "{{ ansible_user_dir }}/.local/bin/oom-edit"
+oom_edit_link_path: "{{ ansible_facts['user_dir'] }}/.local/bin/oom-edit"

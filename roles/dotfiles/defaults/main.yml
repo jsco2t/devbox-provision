@@ -3,7 +3,7 @@
 # --extra-vars if your fork lives elsewhere.
 
 dotfiles_repo_url: "https://github.com/jsco2t/dotfiles.git"
-dotfiles_git_dir: "{{ ansible_user_dir }}/.dotfiles"
+dotfiles_git_dir: "{{ ansible_facts['user_dir'] }}/.dotfiles"
 dotfiles_branch: "main"
 
 # These get written into the bare repo's local config.

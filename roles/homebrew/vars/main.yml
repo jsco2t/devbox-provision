@@ -44,8 +44,9 @@ homebrew_formulae:
 
 # macOS has no native package manager in scope, so the low-level utils that
 # Linux gets from apt/dnf (see roles/native_packages) must come from Homebrew
-# there. These are added to the install list only when ansible_system ==
-# 'Darwin', so Linux keeps its native-package preference.
+# there. These are added to the install list only when
+# ansible_facts['system'] == 'Darwin', so Linux keeps its native-package
+# preference.
 homebrew_formulae_darwin:
   - jq
   - fzf

@@ -8,7 +8,7 @@
 
 - name: Ensure user-local bin directory exists
   ansible.builtin.file:
-    path: "{{ ansible_user_dir }}/.local/bin"
+    path: "{{ ansible_facts['user_dir'] }}/.local/bin"
     state: directory
 
 # In check mode a predicted clone does not materialize the checkout. Capture
@@ -32,7 +32,7 @@
     chdir: "{{ oom_edit_source_dir }}"
     creates: "{{ omit if (upgrade | bool) else oom_edit_release_binary }}"
   environment:
-    PATH: "{{ ansible_user_dir }}/.cargo/bin:{{ ansible_env.PATH }}"
+    PATH: "{{ ansible_facts['user_dir'] }}/.cargo/bin:{{ ansible_facts['env']['PATH'] }}"
   when: not ansible_check_mode or oom_edit_checkout_before.stat.exists
 
 - name: Inspect oom-edit release binary

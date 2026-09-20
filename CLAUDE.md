@@ -114,9 +114,11 @@ is **not on the Ansible session's PATH**. So:
 ### Environment dispatch via facts
 
 Detection uses Ansible facts, never hand-rolled OS sniffing:
-`ansible_system` (Linux/Darwin), `ansible_os_family` (Debian/RedHat),
-`ansible_architecture`. `local.yml`'s `pre_tasks` assert a supported OS/family
-and fail fast otherwise. Follow this pattern for any platform branching.
+`ansible_facts['system']` (Linux/Darwin), `ansible_facts['os_family']`
+(Debian/RedHat), and `ansible_facts['architecture']`. Fact injection is disabled
+in `ansible.cfg`; do not use deprecated top-level aliases such as
+`ansible_system`. `local.yml`'s `pre_tasks` assert a supported OS/family and fail
+fast otherwise. Follow this pattern for any platform branching.
 
 ### Where each tool comes from (and why)
 

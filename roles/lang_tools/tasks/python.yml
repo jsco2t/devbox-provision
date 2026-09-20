@@ -13,7 +13,7 @@
          if (upgrade | bool)
          else ('uv tool install ' ~ item.name) }}
   args:
-    creates: "{{ omit if (upgrade | bool) else ansible_user_dir ~ '/.local/bin/' ~ item.bin }}"
+    creates: "{{ omit if (upgrade | bool) else ansible_facts['user_dir'] ~ '/.local/bin/' ~ item.bin }}"
   environment:
     PATH: "{{ lang_tools_path }}"
   loop: "{{ lang_tools_python }}"
