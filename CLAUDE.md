@@ -58,7 +58,7 @@ them.
 
 `bootstrap.sh` (git + clone) → `update-env.sh` (installs Ansible + collection,
 detects sudo, writes the `~/update-env.sh` wrapper) → `ansible-playbook` runs
-`local.yml` against `localhost` with `connection: local`. `local.yml` runs seven
+`local.yml` against `localhost` with `connection: local`. `local.yml` runs eight
 roles **in a fixed order that encodes a dependency chain**:
 
 1. **common** — env summary; ensure git (apt/dnf) / Xcode CLT (macOS)
@@ -67,12 +67,16 @@ roles **in a fixed order that encodes a dependency chain**:
    `node`/`uv` toolchains**
 4. **golang** — Go via Homebrew
 5. **rust** — Rust via rustup + the `rust-analyzer` component
-6. **lang_tools** — Helix LSPs/formatters/linters via `go`/`cargo`/`npm`/`uv`
-7. **dotfiles** — reproduce the bare-repo `dot` workflow
+6. **oom_edit** — clone the source, run `make build-release`, and link the
+   release binary from `~/.local/bin`
+7. **lang_tools** — Helix LSPs/formatters/linters via `go`/`cargo`/`npm`/`uv`
+8. **dotfiles** — reproduce the bare-repo `dot` workflow
 
-The order matters: `lang_tools` needs go/node/uv (from `homebrew`) and
-cargo/rustup (from `rust`) to exist first. Do not reorder roles without
-accounting for this.
+The order matters: `oom_edit` needs cargo/rustup (from `rust`), while
+`lang_tools` needs go/node/uv (from `homebrew`) and cargo/rustup (from `rust`)
+to exist first. The dotfiles role stays last because it owns user configuration,
+including Yazi's opener rules. Do not reorder roles without accounting for
+these dependencies.
 
 ### Two things every contributor must internalize
 
@@ -104,6 +108,8 @@ is **not on the Ansible session's PATH**. So:
 - `lang_tools` builds `lang_tools_path` (`~/.cargo/bin:~/go/bin:~/.local/bin:<brew>/bin:$PATH`)
   and passes it via `environment:` to every install task. New language tooling
   must run under this PATH or it won't find its toolchain.
+- `oom_edit` prepends `~/.cargo/bin` to its build PATH independently. It must not
+  depend on `lang_tools_path`, which is created by the later `lang_tools` role.
 
 ### Environment dispatch via facts
 
@@ -142,6 +148,15 @@ The split is deliberate — match it when adding tools:
   needed); cargo/npm/uv need a `bin:` field (or, for npm, the package dir under
   `npm root -g`) — a wrong/missing guard only costs a needless rebuild, never
   breakage.
+- **oom_edit** — a dedicated source-build role because the required persistent
+  checkout and Make target do not fit `cargo install`. It clones `main` into
+  `~/.local/bin/oom-edit-src`, builds `target/release/oom-edit`, and maintains
+  `~/.local/bin/oom-edit` as a symlink. Default mode sets `update: false` and
+  guards the build on the release binary; upgrade mode updates the checkout and
+  invokes `make build-release` again. All tasks run as the invoking user. The
+  matching Yazi opener belongs in `jsco2t/dotfiles`, not this role. Dotfiles
+  route Markdown through `~/.local/bin/md_router.sh`, which prefers the adjacent
+  `oom-edit` executable and falls back to `hx` when oom-edit is unavailable.
 
 ### dotfiles role — the subtle one
 
@@ -155,6 +170,8 @@ behaviors to preserve:
 - Applies tracked files with `reset --hard FETCH_HEAD` — **not** `origin/main`:
   `git clone --bare` creates no remote-tracking refs, so `origin/main` doesn't
   exist. Untracked files in `$HOME` are left alone.
+- Owns the Yazi Markdown router and opener. Keep the router in dotfiles so Yazi
+  can fall back to Helix even before the `oom_edit` source build is available.
 
 ## Idempotency contract
 
@@ -168,14 +185,16 @@ There are **two converge modes**, switched by the `upgrade` var (default
   golang roles use `brew list --formula` to detect what's installed and only
   run `brew install` on missing formulae; apt/dnf use `state: present`; the
   language-tool tasks use `creates:` guards on the resulting binary so
-  already-built tools are skipped; `rustup update` is skipped. The one task that
-  needs care to stay at `changed=0` is the dotfiles `reset --hard` — it keys
-  `changed_when` on HEAD-vs-fetched-tip, not on the always-present "HEAD is now
-  at" output.
+  already-built tools are skipped; the `oom_edit` role neither updates its
+  checkout nor rebuilds when its release binary exists; `rustup update` is
+  skipped. The one task that needs care to stay at `changed=0` is the dotfiles
+  `reset --hard` — it keys `changed_when` on HEAD-vs-fetched-tip, not on the
+  always-present "HEAD is now at" output.
 - **Upgrade (`upgrade=true`) — slow.** `brew update` + `brew outdated` to find
   what needs upgrading, then `brew upgrade` on outdated wanted formulae;
   go/cargo/npm re-fetch `@latest` (cargo adds `--force`, `creates` omitted),
-  `rustup update`. Intentionally re-does work; **not** a zero-change run.
+  `rustup update`; `oom_edit` updates its checkout and invokes the release build.
+  Intentionally re-does work; **not** a zero-change run.
 
 When adding a Homebrew formula, add it to the list in
 `roles/homebrew/vars/main.yml` — the role handles both modes automatically via

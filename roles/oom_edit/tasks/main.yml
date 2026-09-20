@@ -1,0 +1,60 @@
+---
+# oom_edit role - keep a source checkout, build its release target, and expose
+# the resulting binary from ~/.local/bin. Everything runs as the invoking user.
+#
+# Default converges clone/build only when missing. Upgrade converges fetch the
+# configured branch and always invoke the Make target; Cargo may still determine
+# that the release artifact is already current.
+
+- name: Ensure user-local bin directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/.local/bin"
+    state: directory
+
+# In check mode a predicted clone does not materialize the checkout. Capture
+# real pre-run state so later tasks do not try to chdir into a missing path.
+- name: Check whether the oom-edit checkout exists
+  ansible.builtin.stat:
+    path: "{{ oom_edit_source_dir }}/.git"
+  register: oom_edit_checkout_before
+  check_mode: false
+
+- name: Clone or update oom-edit source
+  ansible.builtin.git:
+    repo: "{{ oom_edit_repo_url }}"
+    dest: "{{ oom_edit_source_dir }}"
+    version: "{{ oom_edit_repo_version }}"
+    update: "{{ upgrade | bool }}"
+
+- name: Build oom-edit release binary
+  ansible.builtin.command:
+    cmd: make build-release
+    chdir: "{{ oom_edit_source_dir }}"
+    creates: "{{ omit if (upgrade | bool) else oom_edit_release_binary }}"
+  environment:
+    PATH: "{{ ansible_user_dir }}/.cargo/bin:{{ ansible_env.PATH }}"
+  when: not ansible_check_mode or oom_edit_checkout_before.stat.exists
+
+- name: Inspect oom-edit release binary
+  ansible.builtin.stat:
+    path: "{{ oom_edit_release_binary }}"
+  register: oom_edit_release
+  check_mode: false
+
+- name: Verify oom-edit release binary was built
+  ansible.builtin.assert:
+    that:
+      - oom_edit_release.stat.exists
+      - oom_edit_release.stat.isreg
+      - oom_edit_release.stat.executable
+    fail_msg: >-
+      Expected an executable oom-edit release binary at
+      {{ oom_edit_release_binary }} after running make build-release.
+  when: not ansible_check_mode
+
+- name: Link oom-edit into user-local bin
+  ansible.builtin.file:
+    src: "{{ oom_edit_release_binary }}"
+    dest: "{{ oom_edit_link_path }}"
+    state: link
+  when: not ansible_check_mode or oom_edit_release.stat.exists

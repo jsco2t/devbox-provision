@@ -39,9 +39,10 @@ On a fresh machine:
 `bootstrap.sh` ensures git is present, asks where to clone the repo (default:
 `<current dir>/devbox-provision`), clones it, then hands off to the repo's
 `update-env.sh`. That installs Ansible and converges everything: native
-packages, Homebrew tools, Go/Rust toolchains, the Helix language tooling, and
-finally your dotfiles. It also drops a `~/update-env.sh` wrapper so you can
-re-converge any time with a single command.
+packages, Homebrew tools, Go/Rust toolchains, the source-built `oom-edit`
+Markdown editor, the Helix language tooling, and finally your dotfiles. It also
+drops a `~/update-env.sh` wrapper so you can re-converge any time with a single
+command.
 
 See [Usage](#usage) for re-runs, upgrades, dry runs, and details.
 
@@ -64,9 +65,11 @@ CI exercises. Roles run in order:
    the `node`/`uv` toolchains
 4. **golang** — install Go via Homebrew
 5. **rust** — install Rust via `rustup` + the `rust-analyzer` component
-6. **lang_tools** — Helix editor LSPs/formatters/linters via their native
+6. **oom_edit** — clone `oom-edit`, build its release target, and link it from
+   `~/.local/bin`
+7. **lang_tools** — Helix editor LSPs/formatters/linters via their native
    installers (`go install`, `cargo install`, `npm i -g`, `uv tool install`)
-7. **dotfiles** — reproduce the bare-repo `dot` workflow idempotently
+8. **dotfiles** — reproduce the bare-repo `dot` workflow idempotently
 
 Environment dispatch uses Ansible facts, not hand-rolled detection:
 
@@ -95,10 +98,17 @@ Environment dispatch uses Ansible facts, not hand-rolled detection:
 - **npm (`npm i -g`):** language servers for Ansible, JSON/HTML/CSS, Dockerfile,
   Docker Compose, YAML, Bash, plus `markdownlint-cli` and `prettier`.
 - **uv (`uv tool install`):** `python-lsp-server`, `black`.
+- **Source build (`make build-release`):** `oom-edit` is cloned to
+  `~/.local/bin/oom-edit-src`; its release binary remains in that checkout and
+  `~/.local/bin/oom-edit` links to it. The role runs after rustup so the
+  repository-pinned Rust toolchain can be resolved.
 
 The `lang_tools` lists live in `roles/lang_tools/vars/main.yml`. They mirror
 what `jsco2t/dotfiles`'s `.config/helix/deps.sh` installs, expressed as
-idempotent Ansible.
+idempotent Ansible. Yazi's Markdown opener remains configuration owned by the
+peer `jsco2t/dotfiles` repository; this repository only installs the tool. That
+configuration routes Markdown through `~/.local/bin/md_router.sh`, which uses
+the adjacent `oom-edit` when available and falls back to `hx` otherwise.
 
 ## Usage
 
@@ -128,10 +138,11 @@ Equivalently, from the clone itself: `./update-env.sh [--upgrade|--check]`.
 
 **Default vs. upgrade.** A default run is fast and idempotent — it installs
 missing tools and skips everything already present (`go`/`cargo`/`npm`/`uv`
-install tasks are guarded on the resulting binary; Homebrew and apt/dnf use
-`state: present` and skip `brew update`). `--upgrade` is the slow path: it runs
-`brew update`, `state: latest`, re-fetches the language tools at `@latest`, and
-runs `rustup update`.
+install tasks and the `oom-edit` source build are guarded on the resulting
+binary; Homebrew and apt/dnf use `state: present` and skip `brew update`).
+`--upgrade` is the slow path: it runs `brew update`, `state: latest`, re-fetches
+the language tools at `@latest`, runs `rustup update`, pulls the configured
+`oom-edit` branch, and invokes `make build-release` again.
 
 ### Dry run
 

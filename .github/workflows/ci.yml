@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     # A full converge installs Homebrew, Go, Rust, and ~25 language tools
     # (some built from source), so give it plenty of headroom.
-    timeout-minutes: 90
+    timeout-minutes: 120
     container:
       # Debian trixie (glibc 2.41) rather than bookworm (glibc 2.36): current
       # Homebrew bottles require glibc >= 2.39, and on an older host Homebrew
@@ -64,19 +64,94 @@ jobs:
             DOTFILES_USER_EMAIL="ci@example.com" \
             bash "$GITHUB_WORKSPACE/update-env.sh"
 
+      - name: Verify oom-edit install and Markdown routing
+        run: |
+          set -eux
+          sudo -u dev test -d /home/dev/.local/bin/oom-edit-src/.git
+          sudo -u dev test -x /home/dev/.local/bin/oom-edit-src/target/release/oom-edit
+          sudo -u dev test -L /home/dev/.local/bin/oom-edit
+          sudo -u dev test -x /home/dev/.local/bin/md_router.sh
+          test "$(readlink /home/dev/.local/bin/oom-edit)" = \
+            "/home/dev/.local/bin/oom-edit-src/target/release/oom-edit"
+          sudo -u dev env \
+            HOME=/home/dev \
+            PATH="/home/dev/.local/bin:/home/dev/.cargo/bin:$PATH" \
+            oom-edit --version
+          sudo -u dev env HOME=/home/dev python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          path = Path("/home/dev/.config/yazi/yazi.toml")
+          with path.open("rb") as config_file:
+              config = tomllib.load(config_file)
+
+          openers = config["opener"]["md-router"]
+          assert any(
+              opener.get("run") == "~/.local/bin/md_router.sh %s1"
+              and opener.get("block") is True
+              and opener.get("for") == "unix"
+              for opener in openers
+          ), "missing blocking Unix Markdown router opener"
+
+          rules = config["open"]["prepend_rules"]
+          assert any(
+              rule.get("url") == "*.md" and rule.get("use") == "md-router"
+              for rule in rules
+          ), "missing *.md Markdown router rule"
+          PY
+
+          router_test_dir=$(mktemp -d)
+          trap 'rm -rf "$router_test_dir"' EXIT
+          cp /home/dev/.local/bin/md_router.sh "$router_test_dir/md_router.sh"
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'printf "oom-edit:%s:%s\n" "$1" "$2"' \
+            > "$router_test_dir/oom-edit"
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'printf "hx:%s:%s\n" "$1" "$2"' \
+            > "$router_test_dir/hx"
+          chmod +x \
+            "$router_test_dir/md_router.sh" \
+            "$router_test_dir/oom-edit" \
+            "$router_test_dir/hx"
+
+          test "$(PATH="$router_test_dir:$PATH" \
+            "$router_test_dir/md_router.sh" -leading.md)" = \
+            "oom-edit:--:-leading.md"
+          rm "$router_test_dir/oom-edit"
+          test "$(PATH="$router_test_dir:$PATH" \
+            "$router_test_dir/md_router.sh" -leading.md)" = \
+            "hx:--:-leading.md"
+
       # Run 2 - upgrade: exercises the --upgrade path (brew update + state:latest,
       # go/cargo re-fetch @latest, rustup update). Several tasks are intentionally
       # always-changed here, so this is not an idempotency assertion -- it just
       # proves the upgrade path completes without error.
       - name: Upgrade pass (update-env.sh --upgrade)
         run: |
-          set -eux
+          set -euxo pipefail
           sudo -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             DOTFILES_USER_NAME="CI Tester" \
             DOTFILES_USER_EMAIL="ci@example.com" \
-            bash "$GITHUB_WORKSPACE/update-env.sh" --upgrade
+            bash "$GITHUB_WORKSPACE/update-env.sh" --upgrade 2>&1 | \
+            tee /tmp/upgrade.log
+
+      - name: Verify oom-edit upgrade path
+        run: |
+          set -eux
+          checkout=/home/dev/.local/bin/oom-edit-src
+          test "$(sudo -u dev git -C "$checkout" rev-parse HEAD)" = \
+            "$(sudo -u dev git -C "$checkout" rev-parse refs/remotes/origin/main)"
+          awk '
+            /TASK \[oom_edit : Build oom-edit release binary\]/ {
+              getline
+              if ($0 ~ /^changed: \[localhost\]/) found = 1
+            }
+            END { exit !found }
+          ' /tmp/upgrade.log
 
       # Run 3 - idempotency: a default converge after everything is present must
       # report changed=0 for the install tasks (the `creates`/state:present guards

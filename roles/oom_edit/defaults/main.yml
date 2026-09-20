@@ -1,0 +1,9 @@
+---
+# oom-edit source-build defaults. Override these with extra vars when testing a
+# fork or branch; the installed layout remains user-owned under ~/.local/bin.
+
+oom_edit_repo_url: "https://github.com/jsco2t/oom-edit.git"
+oom_edit_repo_version: "main"
+oom_edit_source_dir: "{{ ansible_user_dir }}/.local/bin/oom-edit-src"
+oom_edit_release_binary: "{{ oom_edit_source_dir }}/target/release/oom-edit"
+oom_edit_link_path: "{{ ansible_user_dir }}/.local/bin/oom-edit"
