@@ -1,0 +1,264 @@
+---
+# git_credential_manager role - install Git Credential Manager (GCM) from the
+# upstream GitHub release tarball, in user space:
+#   ~/.local/share/gcm-core/<version>/   the extracted release (binary + libs)
+#   ~/.local/bin/git-credential-manager  symlink to the binary in that dir
+#
+# The release tarball is used on macOS too, not the Homebrew cask: the cask's
+# .pkg needs sudo, and its postinstall runs `git-credential-manager configure`,
+# which rewrites ~/.gitconfig. This role never configures GCM; the credential
+# helper settings are owned by jsco2t/dotfiles.
+#
+# Default converge installs the pinned release (defaults/main.yml) only when the
+# symlink target is missing, so a converged box makes no network request.
+# Upgrade converge resolves releases/latest from the GitHub API and re-fetches.
+# Only the Linux ICU runtime needs root (become per task); everything else runs
+# as the invoking user.
+
+- name: Assert GCM publishes a release for this CPU architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in gcm_arch_map
+    fail_msg: >-
+      GCM publishes no release for architecture '{{ ansible_facts['architecture'] }}'
+      (supported: {{ gcm_arch_map | list | join(', ') }}).
+    quiet: true
+
+- name: Resolve the GCM release platform
+  ansible.builtin.set_fact:
+    gcm_platform: "{{ ('osx' if ansible_facts['system'] == 'Darwin' else 'linux') ~ '-' ~ gcm_arch_map[ansible_facts['architecture']] }}"
+
+# GCM is a self-contained .NET app that aborts at startup without ICU, and the
+# Linux tarball does not bundle it. macOS ships ICU with the OS.
+- name: Install the ICU runtime (RedHat family)
+  become: true
+  ansible.builtin.dnf:
+    name: libicu
+    state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# Debian names the ICU runtime after its soname (libicu72 on bookworm, libicu76
+# on trixie), so look the name up. The anchored pattern excludes libicu-dev.
+- name: Install the ICU runtime (Debian family)
+  when: ansible_facts['os_family'] == 'Debian'
+  block:
+    - name: Find the ICU runtime package
+      ansible.builtin.command:
+        argv: [apt-cache, search, --names-only, "^libicu[0-9]+$"]
+      register: gcm_icu_search
+      changed_when: false
+      check_mode: false
+
+    - name: Assert an ICU runtime package is available
+      ansible.builtin.assert:
+        that:
+          - gcm_icu_search.stdout_lines | select('match', '^libicu[0-9]+ ') | list | length > 0
+        fail_msg: >-
+          apt-cache found no package matching ^libicu[0-9]+$. Refresh the apt
+          cache (the native_packages role does) and re-run.
+        quiet: true
+
+    # Only one libicuNN is normally available; if a release transition offers
+    # two, take the newest (.NET probes ICU versions newest first).
+    - name: Install the ICU runtime package
+      become: true
+      ansible.builtin.apt:
+        name: >-
+          libicu{{ gcm_icu_search.stdout_lines
+                   | select('match', '^libicu[0-9]+ ')
+                   | map('regex_search', '[0-9]+')
+                   | map('int') | max }}
+        state: "{{ 'latest' if (upgrade | bool) else 'present' }}"
+
+# Two stats on the same path: the link itself (is it one, and where does it
+# point) and whatever it resolves to (does the installed binary exist).
+- name: Inspect the git-credential-manager symlink
+  ansible.builtin.stat:
+    path: "{{ gcm_link_path }}"
+    follow: false
+    get_checksum: false
+  register: gcm_link
+
+- name: Inspect the git-credential-manager symlink target
+  ansible.builtin.stat:
+    path: "{{ gcm_link_path }}"
+    follow: true
+    get_checksum: false
+  register: gcm_link_target
+
+- name: Refuse to replace a git-credential-manager this role did not link
+  ansible.builtin.assert:
+    that:
+      - not gcm_link.stat.exists or gcm_link.stat.islnk
+    fail_msg: >-
+      {{ gcm_link_path }} exists and is not a symlink. Move it aside and re-run.
+    quiet: true
+
+- name: Decide whether to install GCM
+  ansible.builtin.set_fact:
+    gcm_install: "{{ (upgrade | bool) or not (gcm_link_target.stat.exists and gcm_link_target.stat.isreg) }}"
+
+- name: Select the pinned GCM release
+  ansible.builtin.set_fact:
+    gcm_target_version: "{{ gcm_version }}"
+    gcm_target_sha256: "{{ gcm_sha256[gcm_platform] }}"
+    gcm_target_url: "{{ gcm_release_download_url }}/v{{ gcm_version }}/gcm-{{ gcm_platform }}-{{ gcm_version }}.tar.gz"
+  when:
+    - gcm_install
+    - not (upgrade | bool)
+
+# no_log keeps the token out of task output and the module's syslog entry. The
+# Authorization header is sent only when the token is set (CI sets it to avoid
+# the unauthenticated API rate limit).
+- name: Resolve the latest GCM release from the GitHub API
+  ansible.builtin.uri:
+    url: "{{ gcm_release_api_url }}"
+    headers: >-
+      {{ {'Accept': 'application/vnd.github+json'}
+         | combine({'Authorization': 'Bearer ' ~ lookup('ansible.builtin.env', 'GITHUB_TOKEN')}
+                   if lookup('ansible.builtin.env', 'GITHUB_TOKEN') else {}) }}
+  register: gcm_latest_release
+  failed_when: false
+  no_log: true
+  check_mode: false
+  when: upgrade | bool
+
+- name: Assert the GitHub API returned the latest GCM release
+  ansible.builtin.assert:
+    that:
+      - gcm_latest_release.status | default(-1) == 200
+    fail_msg: >-
+      GET {{ gcm_release_api_url }} failed (HTTP status
+      {{ gcm_latest_release.status | default('none') }}):
+      {{ gcm_latest_release.msg | default('no message') }}
+    quiet: true
+  when: upgrade | bool
+
+- name: Select the latest GCM release asset
+  vars:
+    gcm_latest_version: "{{ gcm_latest_release.json.tag_name | regex_replace('^v', '') }}"
+    gcm_latest_asset: >-
+      {{ gcm_latest_release.json.assets
+         | selectattr('name', 'equalto', 'gcm-' ~ gcm_platform ~ '-' ~ gcm_latest_version ~ '.tar.gz')
+         | first | default({}) }}
+  ansible.builtin.set_fact:
+    gcm_target_version: "{{ gcm_latest_version }}"
+    gcm_target_sha256: "{{ gcm_latest_asset.digest | default('') | regex_replace('^sha256:', '') }}"
+    gcm_target_url: "{{ gcm_latest_asset.browser_download_url | default('') }}"
+  when: upgrade | bool
+
+# The version names a directory under gcm_home, and the digest is the only
+# integrity check (GCM publishes no checksum file or signature since v2.7.0).
+- name: Assert the latest GCM release has a usable version, asset, and sha256 digest
+  ansible.builtin.assert:
+    that:
+      - gcm_target_version is match('^[0-9]+(\.[0-9]+)*$')
+      - gcm_target_sha256 is match('^[0-9a-f]{64}$')
+      - gcm_target_url is match('^https://')
+    fail_msg: >-
+      releases/latest has no usable gcm-{{ gcm_platform }} tarball with a sha256
+      digest (version '{{ gcm_target_version }}').
+    quiet: true
+  when: upgrade | bool
+
+- name: Install GCM
+  when: gcm_install
+  vars:
+    gcm_version_dir: "{{ gcm_home }}/{{ gcm_target_version }}"
+    gcm_tarball: "{{ gcm_home }}/gcm-{{ gcm_platform }}-{{ gcm_target_version }}.tar.gz"
+  block:
+    - name: Ensure the GCM version directory exists
+      ansible.builtin.file:
+        path: "{{ gcm_version_dir }}"
+        state: directory
+
+    # Check mode cannot download (the directory above is only predicted), so
+    # it reports the install through that task and skips the rest.
+    - name: Download the GCM release tarball
+      ansible.builtin.get_url:
+        url: "{{ gcm_target_url }}"
+        dest: "{{ gcm_tarball }}"
+        checksum: "sha256:{{ gcm_target_sha256 }}"
+        mode: "0644"
+      when: not ansible_check_mode
+
+    # The tarball has no top-level directory. unarchive needs GNU tar
+    # (ansible/modules/unarchive.py rejects bsdtar), and macOS ships only
+    # bsdtar, so macOS extracts with its own tar below.
+    - name: Extract the GCM release (Linux)
+      ansible.builtin.unarchive:
+        src: "{{ gcm_tarball }}"
+        dest: "{{ gcm_version_dir }}"
+        remote_src: true
+      when:
+        - ansible_facts['system'] == 'Linux'
+        - not ansible_check_mode
+
+    - name: Extract the GCM release (macOS)
+      ansible.builtin.command:
+        argv: [tar, -xzf, "{{ gcm_tarball }}", -C, "{{ gcm_version_dir }}"]
+      changed_when: true
+      when: ansible_facts['system'] == 'Darwin'
+
+    - name: Inspect the extracted GCM binary
+      ansible.builtin.stat:
+        path: "{{ gcm_version_dir }}/git-credential-manager"
+        get_checksum: false
+      register: gcm_binary
+      check_mode: false
+
+    - name: Verify the GCM binary was extracted
+      ansible.builtin.assert:
+        that:
+          - gcm_binary.stat.exists
+          - gcm_binary.stat.isreg
+          - gcm_binary.stat.executable
+        fail_msg: >-
+          Expected an executable git-credential-manager in {{ gcm_version_dir }}
+          after extracting {{ gcm_tarball }}.
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Ensure user-local bin directory exists
+      ansible.builtin.file:
+        path: "{{ gcm_link_path | dirname }}"
+        state: directory
+
+    - name: Link git-credential-manager into user-local bin
+      ansible.builtin.file:
+        src: "{{ gcm_version_dir }}/git-credential-manager"
+        dest: "{{ gcm_link_path }}"
+        state: link
+      when: not ansible_check_mode or gcm_binary.stat.exists
+
+  always:
+    - name: Remove the downloaded GCM tarball
+      ansible.builtin.file:
+        path: "{{ gcm_tarball }}"
+        state: absent
+
+# Keep only the version the symlink now targets: the one just installed, or
+# the directory the existing link points into. Matching on the basename stays
+# correct when ~/.local/share is itself reached through a symlink.
+- name: Inspect the GCM install root
+  ansible.builtin.stat:
+    path: "{{ gcm_home }}"
+    get_checksum: false
+  register: gcm_home_stat
+
+- name: Find installed GCM versions
+  ansible.builtin.find:
+    paths: "{{ gcm_home }}"
+    file_type: any
+    hidden: true
+  register: gcm_installed
+  when: gcm_home_stat.stat.isdir | default(false)
+
+- name: Prune GCM versions other than the linked one
+  vars:
+    gcm_keep: "{{ gcm_target_version if gcm_install else (gcm_link.stat.lnk_target | dirname | basename) }}"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ gcm_installed.files | default([]) | map(attribute='path') | list }}"
+  when: item | basename != gcm_keep

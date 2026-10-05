@@ -43,7 +43,17 @@ in a `debian:trixie` container (unprivileged `dev` user, passwordless sudo) it
 runs `update-env.sh` three times — **setup** (default converge), **`--upgrade`**
 (bump path), then **default again asserting `changed=0`** (idempotency). Validate
 non-trivial changes by reasoning about that flow or replicating it in a Debian
-container.
+container. Each step passes `GITHUB_TOKEN` to the `dev` user with
+`sudo --preserve-env=GITHUB_TOKEN`, so the `git_credential_manager` role's
+`--upgrade` API call is not rate-limited.
+
+The one role-level test is `roles/git_credential_manager/tests/verify.sh`
+(`bash roles/git_credential_manager/tests/verify.sh`). CI does not run it. It
+converges only that role twice in default mode and asserts the install layout,
+`changed=0` with no HTTP(S) request on the second run, and an unchanged
+`~/.gitconfig`. It **modifies the host**: it first deletes the
+`~/.local/bin/git-credential-manager` symlink and `~/.local/share/gcm-core`, and
+on Linux it needs sudo for the ICU install.
 
 **CI gap to be aware of:** CI runs `update-env.sh` directly against the checkout,
 so it does **not** cover `bootstrap.sh` itself — the git-install, the
@@ -54,11 +64,16 @@ Note the deployment coupling: the remote one-liner fetches `bootstrap.sh` from
 converge flow must be committed/pushed to `main` before a remote test reflects
 them.
 
+**Platforms CI does not test:** CI is Debian-only. EL9, EL10 and macOS paths
+(dnf packages, `libicu`, the macOS `tar` extract in `git_credential_manager`)
+are written for and reasoned against those platforms but never run in CI.
+Verify changes to them on a real host.
+
 ## Architecture
 
 `bootstrap.sh` (git + clone) → `update-env.sh` (installs Ansible + collection,
 detects sudo, writes the `~/update-env.sh` wrapper) → `ansible-playbook` runs
-`local.yml` against `localhost` with `connection: local`. `local.yml` runs eight
+`local.yml` against `localhost` with `connection: local`. `local.yml` runs nine
 roles **in a fixed order that encodes a dependency chain**:
 
 1. **common** — env summary; ensure git (apt/dnf) / Xcode CLT (macOS)
@@ -70,20 +85,29 @@ roles **in a fixed order that encodes a dependency chain**:
 6. **oom_edit** — clone the source, run `make build-release`, and link the
    release binary from `~/.local/bin`
 7. **lang_tools** — Helix LSPs/formatters/linters via `go`/`cargo`/`npm`/`uv`
-8. **dotfiles** — reproduce the bare-repo `dot` workflow
+8. **git_credential_manager** — install Git Credential Manager (GCM) from its
+   GitHub release tarball into user space; never configures it
+9. **dotfiles** — reproduce the bare-repo `dot` workflow
 
 The order matters: `oom_edit` needs cargo/rustup (from `rust`), while
 `lang_tools` needs go/node/uv (from `homebrew`) and cargo/rustup (from `rust`)
-to exist first. The dotfiles role stays last because it owns user configuration,
-including Yazi's opener rules. Do not reorder roles without accounting for
-these dependencies.
+to exist first. `git_credential_manager` needs nothing from `homebrew`,
+`golang`, `rust`, or `lang_tools`; on Debian it relies only on the apt cache
+that `common` and `native_packages` refresh, because it looks up the ICU package
+name with `apt-cache`. It runs before `dotfiles` so the GCM binary exists when
+dotfiles applies the credential-helper config. The dotfiles role stays last
+because it owns user configuration, including Yazi's opener rules and the git
+credential helpers. Do not reorder roles without accounting for these
+dependencies.
 
 ### Two things every contributor must internalize
 
 **1. The privilege split.** `local.yml` sets `become: false` at the play level
 on purpose. Native package roles opt into `become: true` **per task**; Homebrew,
 language installers, and dotfiles must run as the **invoking user** (Homebrew
-refuses to run as root; go/cargo/npm/uv install into `$HOME`). When adding tasks,
+refuses to run as root; go/cargo/npm/uv install into `$HOME`). In
+`git_credential_manager`, only the two ICU package tasks escalate; download,
+extract, link, and prune run as the invoking user. When adding tasks,
 add `become: true` only to things that genuinely need root, never a blanket
 escalation.
 
@@ -159,6 +183,47 @@ The split is deliberate — match it when adding tools:
   matching Yazi opener belongs in `jsco2t/dotfiles`, not this role. Dotfiles
   route Markdown through `~/.local/bin/md_router.sh`, which prefers the adjacent
   `oom-edit` executable and falls back to `hx` when oom-edit is unavailable.
+- **git_credential_manager** — GCM comes from the upstream GitHub release
+  tarball (`gcm-{linux,osx}-{x64,arm64}-<version>.tar.gz`) on every OS,
+  **not** the Homebrew cask. The cask installs a `.pkg` that needs sudo, and the
+  `.pkg` postinstall runs `git-credential-manager configure`, which rewrites
+  `~/.gitconfig` (`roles/git_credential_manager/tasks/main.yml:7-10`). Key
+  behaviors:
+  - `gcm_arch_map` maps `ansible_facts['architecture']` (`x86_64`, `aarch64`,
+    `arm64`) to the asset's `x64`/`arm64`; any other architecture fails an
+    assert (`roles/git_credential_manager/vars/main.yml:4-7`).
+  - Each release extracts into `~/.local/share/gcm-core/<version>/` (`gcm_home`),
+    keeping the binary beside its `.so` files, and
+    `~/.local/bin/git-credential-manager` (`gcm_link_path`) symlinks to the
+    binary (`roles/git_credential_manager/defaults/main.yml:21-24`). The role
+    fails rather than replace a non-symlink at that path, and prunes every
+    version directory except the one the symlink targets.
+  - GCM is a self-contained .NET app that aborts without ICU, so on Linux the
+    role installs it with `become: true`: `libicu` via dnf on EL, and on Debian
+    the newest `libicuNN` that `apt-cache search --names-only '^libicu[0-9]+$'`
+    finds (never `libicu-dev`). macOS ships ICU.
+  - Linux extracts with `unarchive`; macOS extracts with the system `tar`,
+    because `unarchive` rejects bsdtar.
+  - The tarball's sha256 is the only integrity check: GCM has published no
+    checksum file or signature since v2.7.0, so `get_url` verifies against a
+    pinned digest (default mode) or the GitHub API's per-asset `digest`
+    (`--upgrade`).
+  - The role never configures GCM. The credential helpers, credential store,
+    and per-host precedence (gh keeps `https://github.com` and
+    `https://gist.github.com`) live in `jsco2t/dotfiles`'s
+    `.config/git/config`.
+
+  **Pinned release.** `gcm_version` and `gcm_sha256` (keys `linux-x64`,
+  `linux-arm64`, `osx-x64`, `osx-arm64`) pin 2.9.1
+  (`roles/git_credential_manager/defaults/main.yml:11-16`). To bump them, take
+  `tag_name` and each tarball's `digest` (`sha256:...`) from `gcm_release_api_url`
+  (`https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest`),
+  and update the `2.9.1` default of `GCM_EXPECTED_VERSION` in
+  `roles/git_credential_manager/tests/verify.sh:34` to match. A bumped pin
+  reaches only hosts with no installed GCM: a default converge installs only
+  when the symlink target is missing
+  (`roles/git_credential_manager/tasks/main.yml:97-99`), so existing hosts move
+  only on `--upgrade`, which ignores the pin.
 
 ### dotfiles role — the subtle one
 
@@ -189,14 +254,20 @@ There are **two converge modes**, switched by the `upgrade` var (default
   language-tool tasks use `creates:` guards on the resulting binary so
   already-built tools are skipped; the `oom_edit` role neither updates its
   checkout nor rebuilds when its release binary exists; `rustup update` is
-  skipped. The one task that needs care to stay at `changed=0` is the dotfiles
-  `reset --hard` — it keys `changed_when` on HEAD-vs-fetched-tip, not on the
-  always-present "HEAD is now at" output.
+  skipped; `git_credential_manager` makes no network request when its symlink
+  resolves to a binary (no GitHub API call, no download) and installs ICU with
+  `state: present`. The one task that needs care to stay at `changed=0` is the
+  dotfiles `reset --hard` — it keys `changed_when` on HEAD-vs-fetched-tip, not
+  on the always-present "HEAD is now at" output.
 - **Upgrade (`upgrade=true`) — slow.** `brew update` + `brew outdated` to find
   what needs upgrading, then `brew upgrade` on outdated wanted formulae;
   go/cargo/npm re-fetch `@latest` (cargo adds `--force`, `creates` omitted),
-  `rustup update`; `oom_edit` updates its checkout and invokes the release build.
-  Intentionally re-does work; **not** a zero-change run.
+  `rustup update`; `oom_edit` updates its checkout and invokes the release build;
+  `git_credential_manager` re-resolves the latest release from the GitHub API
+  (sending `Authorization: Bearer $GITHUB_TOKEN` only when `GITHUB_TOKEN` is set,
+  under `no_log`), re-downloads and re-extracts it even when the version is
+  unchanged, points the symlink at it, prunes other versions, and installs ICU with
+  `state: latest`. Intentionally re-does work; **not** a zero-change run.
 
 When adding a Homebrew formula, add it to the list in
 `roles/homebrew/vars/main.yml` — the role handles both modes automatically via
@@ -216,4 +287,6 @@ Script env vars: `bootstrap.sh` honors `PROVISION_REPO_URL`,
 `PROVISION_REPO_BRANCH`, and `PROVISION_DEST` (clone location, skips the prompt);
 `update-env.sh` honors `PROVISION_ASK_BECOME_PASS=1|0` (sudo prompt) and
 `PROVISION_UPGRADE` (upgrade mode). `bootstrap.sh` forwards extra args
-(`--upgrade`, `--check`) through to `update-env.sh`.
+(`--upgrade`, `--check`) through to `update-env.sh`. The `git_credential_manager`
+role reads `GITHUB_TOKEN` in upgrade mode only, to authenticate its GitHub API
+call; leaving it unset uses the unauthenticated API rate limit.

@@ -55,9 +55,14 @@ jobs:
       # community.general collection, then installs everything that is missing.
       # This is the heavy first run (compiles the go/cargo tools from source).
       - name: Setup environment (update-env.sh)
+        # The git_credential_manager role's --upgrade path calls the GitHub
+        # API; the token lifts its unauthenticated rate limit. sudo passes it
+        # to the dev user by name, so the xtraced script never expands it.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
-          sudo -u dev env \
+          sudo --preserve-env=GITHUB_TOKEN -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             DOTFILES_USER_NAME="CI Tester" \
@@ -129,9 +134,12 @@ jobs:
       # always-changed here, so this is not an idempotency assertion -- it just
       # proves the upgrade path completes without error.
       - name: Upgrade pass (update-env.sh --upgrade)
+        # GITHUB_TOKEN reaches the dev user as in the setup step.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          sudo -u dev env \
+          sudo --preserve-env=GITHUB_TOKEN -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             DOTFILES_USER_NAME="CI Tester" \
@@ -157,9 +165,12 @@ jobs:
       # report changed=0 for the install tasks (the `creates`/state:present guards
       # skip already-installed tools). We assert the recap shows no changes.
       - name: Idempotency check (update-env.sh, expect changed=0)
+        # GITHUB_TOKEN reaches the dev user as in the setup step.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          sudo -u dev env \
+          sudo --preserve-env=GITHUB_TOKEN -u dev env \
             HOME=/home/dev \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             DOTFILES_USER_NAME="CI Tester" \

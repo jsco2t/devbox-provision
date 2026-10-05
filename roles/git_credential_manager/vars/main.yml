@@ -1,0 +1,7 @@
+---
+# Maps ansible_facts['architecture'] to the architecture in GCM's release asset
+# names (Linux reports aarch64, macOS reports arm64).
+gcm_arch_map:
+  x86_64: x64
+  aarch64: arm64
+  arm64: arm64

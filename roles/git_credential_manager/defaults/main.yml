@@ -1,0 +1,24 @@
+---
+# Git Credential Manager (GCM) install defaults.
+#
+# A default converge installs this pinned release, verified against the pinned
+# sha256 digests below, so it never calls the GitHub API. `--upgrade` resolves
+# releases/latest instead and verifies against the digest the API reports.
+#
+# To bump the pin, take tag_name and each tarball's `digest` (sha256:...) from
+#   https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest
+# Asset names: gcm-{linux,osx}-{x64,arm64}-<version>.tar.gz.
+gcm_version: "2.9.1"
+gcm_sha256:
+  linux-x64: "31fc151c3b111ffe25616a4356bd9a50bdcdbd0922c5e11990fb220c6caf1ce1"
+  linux-arm64: "cf3806b7528b5a5af16bd4bd0683202fc432d9008dd91d20c4c6744b24a033b5"
+  osx-x64: "326fc3e1c708ae792b010b2f9f701f3dc4dbaebdf40cafd036254ab0f148c034"
+  osx-arm64: "2ac8f99258d04acb45cf592eb5b06ec0e0760c329bce40a4d18dabb5e0e37f68"
+
+gcm_release_api_url: "https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest"
+gcm_release_download_url: "https://github.com/git-ecosystem/git-credential-manager/releases/download"
+
+# Each release extracts into <gcm_home>/<version>/; the symlink points at the
+# binary inside the active one.
+gcm_home: "{{ ansible_facts['user_dir'] }}/.local/share/gcm-core"
+gcm_link_path: "{{ ansible_facts['user_dir'] }}/.local/bin/git-credential-manager"

@@ -40,9 +40,9 @@ On a fresh machine:
 `<current dir>/devbox-provision`), clones it, then hands off to the repo's
 `update-env.sh`. That installs Ansible and converges everything: native
 packages, Homebrew tools, Go/Rust toolchains, the source-built `oom-edit`
-Markdown editor, the Helix language tooling, and finally your dotfiles. It also
-drops a `~/update-env.sh` wrapper so you can re-converge any time with a single
-command.
+Markdown editor, the Helix language tooling, Git Credential Manager, and finally
+your dotfiles. It also drops a `~/update-env.sh` wrapper so you can re-converge
+any time with a single command.
 
 See [Usage](#usage) for re-runs, upgrades, dry runs, and details.
 
@@ -51,7 +51,10 @@ See [Usage](#usage) for re-runs, upgrades, dry runs, and details.
 - **OS:** Linux and macOS (no Windows)
 - **Linux families:** Debian-based and Enterprise Linux (RedHat family)
 - **Arch:** arm64 and x86_64 (Homebrew, the native package managers, rustup, and
-  the language installers all resolve arch themselves)
+  the language installers resolve arch themselves; the `git_credential_manager`
+  role maps it to GCM's `x64`/`arm64` release assets)
+- **CI coverage:** CI runs on Debian only. Enterprise Linux 9/10 and macOS are
+  supported by design but not tested in CI.
 
 ## Design
 
@@ -69,15 +72,18 @@ CI exercises. Roles run in order:
    `~/.local/bin`
 7. **lang_tools** — Helix editor LSPs/formatters/linters via their native
    installers (`go install`, `cargo install`, `npm i -g`, `uv tool install`)
-8. **dotfiles** — reproduce the bare-repo `dot` workflow idempotently
+8. **git_credential_manager** — install Git Credential Manager (GCM) from its
+   GitHub release tarball into `~/.local/share/gcm-core`, linked from
+   `~/.local/bin`; it never configures GCM
+9. **dotfiles** — reproduce the bare-repo `dot` workflow idempotently
 
 Environment dispatch uses Ansible facts, not hand-rolled detection:
 
 | Fact | Drives |
 |------|--------|
-| `ansible_facts['system']` (`Linux`/`Darwin`) | brew prefix, native-vs-brew split |
-| `ansible_facts['os_family']` (`Debian`/`RedHat`) | `apt` vs `dnf`, EPEL |
-| `ansible_facts['architecture']` | Homebrew prefix (`/opt/homebrew` vs `/usr/local`) |
+| `ansible_facts['system']` (`Linux`/`Darwin`) | brew prefix, native-vs-brew split, GCM `linux`/`osx` asset |
+| `ansible_facts['os_family']` (`Debian`/`RedHat`) | `apt` vs `dnf`, EPEL, ICU package for GCM |
+| `ansible_facts['architecture']` | Homebrew prefix (`/opt/homebrew` vs `/usr/local`), GCM `x64`/`arm64` asset |
 
 ### Where each tool comes from
 
@@ -102,10 +108,23 @@ Environment dispatch uses Ansible facts, not hand-rolled detection:
   `~/.local/bin/oom-edit-src`; its release binary remains in that checkout and
   `~/.local/bin/oom-edit` links to it. The role runs after rustup so the
   repository-pinned Rust toolchain can be resolved.
+- **GitHub release tarball:** Git Credential Manager, on Linux and macOS alike.
+  The Homebrew cask is avoided because its `.pkg` needs sudo and its postinstall
+  runs `git-credential-manager configure`, which rewrites `~/.gitconfig`. A
+  default run installs the release pinned in
+  `roles/git_credential_manager/defaults/main.yml` (`gcm_version` plus a sha256
+  per asset), so it makes no GitHub API call; `--upgrade` resolves the latest
+  release and its sha256 from the GitHub API. The download is verified against
+  that sha256, extracted to `~/.local/share/gcm-core/<version>/`, and linked as
+  `~/.local/bin/git-credential-manager`. On Linux the role also installs the ICU
+  runtime GCM needs (`libicu` on EL, `libicuNN` on Debian).
 
 The `lang_tools` lists live in `roles/lang_tools/vars/main.yml`. They mirror
 what `jsco2t/dotfiles`'s `.config/helix/deps.sh` installs, expressed as
-idempotent Ansible. Yazi's Markdown opener remains configuration owned by the
+idempotent Ansible. Which hosts use GCM, its credential store, and the
+precedence that keeps `gh` serving github.com are configuration owned by
+`jsco2t/dotfiles` (`.config/git/config`); this repository only installs GCM.
+Yazi's Markdown opener likewise remains configuration owned by the
 peer `jsco2t/dotfiles` repository; this repository only installs the tool. That
 configuration routes Markdown through `~/.local/bin/md_router.sh`, which uses
 the adjacent `oom-edit` when available and falls back to `hx` otherwise.
@@ -139,10 +158,20 @@ Equivalently, from the clone itself: `./update-env.sh [--upgrade|--check]`.
 **Default vs. upgrade.** A default run is fast and idempotent — it installs
 missing tools and skips everything already present (`go`/`cargo`/`npm`/`uv`
 install tasks and the `oom-edit` source build are guarded on the resulting
-binary; Homebrew and apt/dnf use `state: present` and skip `brew update`).
-`--upgrade` is the slow path: it runs `brew update`, `state: latest`, re-fetches
-the language tools at `@latest`, runs `rustup update`, pulls the configured
-`oom-edit` branch, and invokes `make build-release` again.
+binary; Homebrew and apt/dnf use `state: present` and skip `brew update`; GCM
+is installed only when `~/.local/bin/git-credential-manager` does not resolve to
+a binary). `--upgrade` is the slow path: it runs `brew update`, `state: latest`,
+re-fetches the language tools at `@latest`, runs `rustup update`, pulls the
+configured `oom-edit` branch, invokes `make build-release` again, and
+re-downloads the latest GCM release. Set `GITHUB_TOKEN` to authenticate the GCM
+upgrade's GitHub API call; without it the unauthenticated rate limit applies.
+
+Bumping the pinned GCM release changes only fresh installs: hosts that already
+have GCM move to a new version on `--upgrade`. To bump the pin, update
+`gcm_version` and `gcm_sha256` from the `tag_name` and per-asset `digest` at
+`https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest`,
+and update the `GCM_EXPECTED_VERSION` default in
+`roles/git_credential_manager/tests/verify.sh` to match.
 
 ### Dry run
 
@@ -179,13 +208,18 @@ dotfiles_user_email: "{{ lookup('env', 'DOTFILES_USER_EMAIL') | default('you@exa
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` (and on demand via
-*workflow_dispatch*). It spins up a Debian container, creates an unprivileged
-user, and runs `update-env.sh` three times:
+*workflow_dispatch*). It spins up a Debian (`debian:trixie`) container, creates
+an unprivileged user, and runs `update-env.sh` three times:
 
 1. **setup** — a default converge installs everything that's missing,
 2. **`--upgrade`** — exercises the bump-to-latest path,
 3. **default again** — asserts the steady-state converge reports `changed=0`
    (the idempotency guarantee).
+
+CI covers Debian only. The Enterprise Linux 9/10 and macOS paths are reasoned
+about but not tested in CI. `roles/git_credential_manager/tests/verify.sh` is a
+role-level acceptance test you can run by hand. It deletes and reinstalls GCM
+on the host it runs on.
 
 ## Notes
 

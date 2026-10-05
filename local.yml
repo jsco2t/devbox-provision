@@ -4,14 +4,15 @@
 # for the bump-to-latest path; default is install-missing-only.
 #
 # Role order matters:
-#   1. common          - gather facts, sanity-check the environment
-#   2. native_packages - low-level utils from apt/dnf (platform binaries)
-#   3. homebrew        - install brew + fast-moving tools + toolchains (node/uv)
-#   4. golang          - install Go via Homebrew
-#   5. rust            - install Rust via rustup + rust-analyzer
-#   6. oom_edit        - clone and release-build the oom-edit Markdown editor
-#   7. lang_tools      - helix LSPs/formatters via go/cargo/npm/uv
-#   8. dotfiles        - hand off to the existing bare-repo dotfiles process
+#   1. common                 - gather facts, sanity-check the environment
+#   2. native_packages        - low-level utils from apt/dnf (platform binaries)
+#   3. homebrew               - install brew + fast-moving tools + toolchains (node/uv)
+#   4. golang                 - install Go via Homebrew
+#   5. rust                   - install Rust via rustup + rust-analyzer
+#   6. oom_edit               - clone and release-build the oom-edit Markdown editor
+#   7. lang_tools             - helix LSPs/formatters via go/cargo/npm/uv
+#   8. git_credential_manager - install GCM from its GitHub release (never configures it)
+#   9. dotfiles               - hand off to the existing bare-repo dotfiles process
 
 - name: Provision local development machine
   hosts: localhost
@@ -49,4 +50,5 @@
     - role: rust
     - role: oom_edit
     - role: lang_tools
+    - role: git_credential_manager
     - role: dotfiles

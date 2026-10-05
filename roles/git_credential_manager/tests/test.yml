@@ -1,0 +1,20 @@
+---
+# test.yml - converge ONLY the git_credential_manager role against localhost,
+# with the same play settings local.yml uses. tests/verify.sh drives it
+# (inventory, connection, -e upgrade=false); see that script for the checks.
+
+- name: Converge the git_credential_manager role
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  # Same privilege split as local.yml: the role opts into become per task.
+  become: false
+
+  vars:
+    # Mirrors group_vars/all.yml, which a playbook outside the repo root does
+    # not load. -e upgrade=... still wins.
+    upgrade: "{{ (lookup('env', 'PROVISION_UPGRADE') | default('false', true)) | bool }}"
+
+  roles:
+    - role: git_credential_manager
