@@ -158,7 +158,8 @@ Equivalently, from the clone itself: `./update-env.sh [--upgrade|--check]`.
 **Default vs. upgrade.** A default run is fast and idempotent — it installs
 missing tools and skips everything already present (`go`/`cargo`/`npm`/`uv`
 install tasks and the `oom-edit` source build are guarded on the resulting
-binary; Homebrew and apt/dnf use `state: present` and skip `brew update`; GCM
+binary, and `rustup update` runs only before building a missing cargo tool;
+Homebrew and apt/dnf use `state: present` and skip `brew update`; GCM
 is installed only when `~/.local/bin/git-credential-manager` does not resolve to
 a binary). `--upgrade` is the slow path: it runs `brew update`, `state: latest`,
 re-fetches the language tools at `@latest`, runs `rustup update`, pulls the

@@ -253,8 +253,10 @@ There are **two converge modes**, switched by the `upgrade` var (default
   run `brew install` on missing formulae; apt/dnf use `state: present`; the
   language-tool tasks use `creates:` guards on the resulting binary so
   already-built tools are skipped; the `oom_edit` role neither updates its
-  checkout nor rebuilds when its release binary exists; `rustup update` is
-  skipped; `git_credential_manager` makes no network request when its symlink
+  checkout nor rebuilds when its release binary exists; `rustup update stable`
+  runs only when a cargo-installed lang tool is missing and about to be built
+  (its newest release may need a newer rustc than the installed stable);
+  `git_credential_manager` makes no network request when its symlink
   resolves to a binary (no GitHub API call, no download) and installs ICU with
   `state: present`. The one task that needs care to stay at `changed=0` is the
   dotfiles `reset --hard` — it keys `changed_when` on HEAD-vs-fetched-tip, not

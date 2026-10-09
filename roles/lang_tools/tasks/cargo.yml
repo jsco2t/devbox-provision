@@ -1,4 +1,27 @@
 ---
+# A crate build always fetches the newest published release, which may need a
+# newer rustc than the installed stable toolchain (crates such as harper-ls
+# declare no rust-version, so cargo cannot pick an older compatible release).
+# The rust role updates stable only in upgrade mode, so in default mode update
+# it here, but only when a crate is about to be built. A steady-state converge
+# with every binary present skips this and stays at changed=0.
+- name: Check for cargo-installed binaries
+  ansible.builtin.stat:
+    path: "{{ ansible_facts['user_dir'] ~ '/.cargo/bin/' ~ item.bin }}"
+  loop: "{{ lang_tools_cargo + lang_tools_cargo_git }}"
+  loop_control:
+    label: "{{ item.bin }}"
+  register: lang_tools_cargo_bins
+
+- name: Update Rust toolchain before building missing crates
+  ansible.builtin.command:
+    cmd: "{{ ansible_facts['user_dir'] }}/.cargo/bin/rustup update stable"
+  register: lang_tools_rustup_update
+  changed_when: "'updated' in lang_tools_rustup_update.stdout or 'installed' in lang_tools_rustup_update.stdout"
+  when:
+    - not (upgrade | bool)
+    - lang_tools_cargo_bins.results | rejectattr('stat.exists') | list | length > 0
+
 # Default: install a crate only if its binary is missing from ~/.cargo/bin (the
 # `creates` guard skips already-built crates -- the slow Rust compiles only run
 # once). Upgrade: `creates` is omitted and --force rebuilds to the latest
